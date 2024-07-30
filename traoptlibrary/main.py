@@ -5,9 +5,12 @@ from jax import random
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
+from  functools import partial
 
 seed = 24234156
 key = random.key(seed)
+
+dt = 0.01
 
 def f(x, u):
     g = 9.8 # m/s^2
@@ -39,9 +42,20 @@ def fd_rk4(x, u, i, dt):
     return x_next
 
 
+fd_rk4_dt = partial( fd_rk4, dt = dt )
+
 if __name__ == "__main__":
 
-    dynamics = AutoDiffDynamics( fd_rk4, 2,1 ) 
+    dynamics = AutoDiffDynamics( fd_rk4_dt , 2, 1, hessians=True ) 
+
+    x = random.normal(key, (2,))
+    u = random.normal(key, ())
+    i = 1
+
+    print(dynamics.f_xx(x,u,i))
+
+
+
 
     
 
