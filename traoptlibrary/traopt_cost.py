@@ -1,11 +1,8 @@
 """Instantaneous Cost Function."""
 
-import six
 import abc
 import numpy as np
-import theano.tensor as T
-from scipy.optimize import approx_fprime
-from .autodiff import as_function, hessian_scalar, jacobian_scalar
+from jax import jacfwd, hessian
 
 class BaseCost():
 
@@ -114,87 +111,56 @@ class AutoDiffCost(BaseCost):
           the non-terminal cost can be a function of x, u and i.
     """
 
-    def __init__(self, l, l_terminal, x_inputs, u_inputs, i=None, **kwargs):
+    def __init__(self, l, l_terminal, state_size, action_size, **kwargs):
         """Constructs an AutoDiffCost.
 
         Args:
-            l: Vector Theano tensor expression for instantaneous cost.
+            l: Function for instantaneous stage cost.
                 This needs to be a function of x and u and must return a scalar.
-            l_terminal: Vector Theano tensor expression for terminal cost.
+                Args:
+                    x: Current state [state_size].
+                    u: Current control [action_size]. None if terminal.
+                    i: Current time step.
+            l_terminal: Function for terminal cost.
                 This needs to be a function of x only and must retunr a scalar.
-            x_inputs: Theano state input variables [state_size].
-            u_inputs: Theano action input variables [action_size].
-            i: Theano tensor time step variable.
+                Args:
+                    x: Current state [state_size].
+                    i: Current time step.
+            state_size: State variable dimension.
+            action_size: Action variable dimension.
             **kwargs: Additional keyword-arguments to pass to
                 `theano.function()`.
         """
-        self._i = T.dscalar("i") if i is None else i
-        self._x_inputs = x_inputs
-        self._u_inputs = u_inputs
+        self._state_size = state_size
+        self._action_size = action_size
 
-        non_t_inputs = np.hstack([x_inputs, u_inputs]).tolist()
-        inputs = np.hstack([x_inputs, u_inputs, self._i]).tolist()
-        terminal_inputs = np.hstack([x_inputs, self._i]).tolist()
+        self._l = l
+        self._l_x = jacfwd(l)
+        self._l_u = jacfwd(l, argnums=1)
 
-        x_dim = len(x_inputs)
-        u_dim = len(u_inputs)
-
-        self._J = jacobian_scalar(l, non_t_inputs)
-        self._Q = hessian_scalar(l, non_t_inputs)
-
-        self._l = as_function(l, inputs, name="l", **kwargs)
-
-        self._l_x = as_function(self._J[:x_dim], inputs, name="l_x", **kwargs)
-        self._l_u = as_function(self._J[x_dim:], inputs, name="l_u", **kwargs)
-
-        self._l_xx = as_function(self._Q[:x_dim, :x_dim],
-                                 inputs,
-                                 name="l_xx",
-                                 **kwargs)
-        self._l_ux = as_function(self._Q[x_dim:, :x_dim],
-                                 inputs,
-                                 name="l_ux",
-                                 **kwargs)
-        self._l_uu = as_function(self._Q[x_dim:, x_dim:],
-                                 inputs,
-                                 name="l_uu",
-                                 **kwargs)
+        self._l_xx = hessian(l, argnums=0)
+        self._l_ux = jacfwd( jacfwd(l, argnums=1) )
+        self._l_uu = hessian(l, argnums=1)
 
         # Terminal cost only depends on x, so we only need to evaluate the x
         # partial derivatives.
-        self._J_terminal = jacobian_scalar(l_terminal, x_inputs)
-        self._Q_terminal = hessian_scalar(l_terminal, x_inputs)
 
-        self._l_terminal = as_function(l_terminal,
-                                       terminal_inputs,
-                                       name="l_term",
-                                       **kwargs)
-        self._l_x_terminal = as_function(self._J_terminal[:x_dim],
-                                         terminal_inputs,
-                                         name="l_term_x",
-                                         **kwargs)
-        self._l_xx_terminal = as_function(self._Q_terminal[:x_dim, :x_dim],
-                                          terminal_inputs,
-                                          name="l_term_xx",
-                                          **kwargs)
+        self._l_terminal = l_terminal
+        self._l_x_terminal = jacfwd(l_terminal)
+        self._l_xx_terminal = hessian(l_terminal)
 
         super(AutoDiffCost, self).__init__()
 
     @property
-    def x(self):
-        """The state variables."""
-        return self._x_inputs
+    def state_size(self):
+        """State size."""
+        return self._state_size
 
     @property
-    def u(self):
-        """The control variables."""
-        return self._u_inputs
-
-    @property
-    def i(self):
-        """The time step variable."""
-        return self._i
-
+    def action_size(self):
+        """Action size."""
+        return self._action_size
+    
     def l(self, x, u, i, terminal=False):
         """Instantaneous cost function.
 
@@ -208,11 +174,9 @@ class AutoDiffCost(BaseCost):
             Instantaneous cost (scalar).
         """
         if terminal:
-            z = np.hstack([x, i])
-            return np.asscalar(self._l_terminal(*z))
+            return self._l_terminal(x,i)
 
-        z = np.hstack([x, u, i])
-        return np.asscalar(self._l(*z))
+        return self._l(x,u,i)
 
     def l_x(self, x, u, i, terminal=False):
         """Partial derivative of cost function with respect to x.
@@ -227,11 +191,9 @@ class AutoDiffCost(BaseCost):
             dl/dx [state_size].
         """
         if terminal:
-            z = np.hstack([x, i])
-            return np.array(self._l_x_terminal(*z))
+            return self._l_x_terminal(x,i)
 
-        z = np.hstack([x, u, i])
-        return np.array(self._l_x(*z))
+        return self._l_x(x,u,i)
 
     def l_u(self, x, u, i, terminal=False):
         """Partial derivative of cost function with respect to u.
@@ -249,8 +211,7 @@ class AutoDiffCost(BaseCost):
             # Not a function of u, so the derivative is zero.
             return np.zeros(self._action_size)
 
-        z = np.hstack([x, u, i])
-        return np.array(self._l_u(*z))
+        return self._l_u(x,u,i)
 
     def l_xx(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to x.
@@ -265,11 +226,9 @@ class AutoDiffCost(BaseCost):
             d^2l/dx^2 [state_size, state_size].
         """
         if terminal:
-            z = np.hstack([x, i])
-            return np.array(self._l_xx_terminal(*z))
+            return self._l_xx_terminal(x,i)
 
-        z = np.hstack([x, u, i])
-        return np.array(self._l_xx(*z))
+        return self._l_xx(x,u,i)
 
     def l_ux(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to u and x.
@@ -287,8 +246,7 @@ class AutoDiffCost(BaseCost):
             # Not a function of u, so the derivative is zero.
             return np.zeros((self._action_size, self._state_size))
 
-        z = np.hstack([x, u, i])
-        return np.array(self._l_ux(*z))
+        return self._l_ux(x,u,i)
 
     def l_uu(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to u.
@@ -306,5 +264,4 @@ class AutoDiffCost(BaseCost):
             # Not a function of u, so the derivative is zero.
             return np.zeros((self._action_size, self._action_size))
 
-        z = np.hstack([x, u, i])
-        return np.array(self._l_uu(*z))
+        return self._l_uu(x,u,i)
