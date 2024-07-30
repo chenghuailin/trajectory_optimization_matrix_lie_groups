@@ -1,5 +1,6 @@
 from traopt_controller import iLQR
 from traopt_dynamics import AutoDiffDynamics
+from traopt_cost import AutoDiffCost
 
 from jax import random
 import jax.numpy as jnp
@@ -44,6 +45,16 @@ def fd_rk4(x, u, i, dt):
 
 fd_rk4_dt = partial( fd_rk4, dt = dt )
 
+
+def l(x,u,i):
+    R = 1
+    return 0.5 * u * R * u
+
+def l_terminal(x,u,i):
+    Q_terminal = jnp.diag( jnp.array([1000,50]) )
+    
+
+
 if __name__ == "__main__":
 
     dynamics = AutoDiffDynamics( fd_rk4_dt , 2, 1, hessians=True ) 
@@ -51,8 +62,24 @@ if __name__ == "__main__":
     x = random.normal(key, (2,))
     u = random.normal(key, ())
     i = 1
+    
+    print("x = ",x)
+    print("u = ",x)
 
-    print(dynamics.f_xx(x,u,i))
+    print("f = ",   dynamics.f(x,u,i))
+    print("fx = ",  dynamics.f_x(x,u,i))
+    print("fu = ",  dynamics.f_u(x,u,i))
+    print("fxx = ", dynamics.f_xx(x,u,i))
+    print("fux = ", dynamics.f_ux(x,u,i))
+    print("fuu = ", dynamics.f_uu(x,u,i))
+
+    cost = AutoDiffCost( l, l_terminal, 2, 1 )
+
+    print("l = ",   cost.l(x,u,i))
+    print("lx = ",  cost.l_x(x,u,i))
+    print("lu = ",  cost.l_u(x,u,i))
+    print("lxx = ", cost.l_xx(x,u,i))
+    print("luu = ", cost.l_uu(x,u,i))
 
 
 
