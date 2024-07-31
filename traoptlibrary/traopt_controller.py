@@ -100,6 +100,7 @@ class iLQR(BaseController):
         converged = False
         for iteration in range(n_iterations):
             accepted = False
+            print("Outer Iteration: ", iteration)
 
             # Forward rollout only if it needs to be recomputed.
             if changed:

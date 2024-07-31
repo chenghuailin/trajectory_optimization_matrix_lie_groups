@@ -80,6 +80,7 @@ if __name__ == "__main__":
     state_size = 2
     action_size = 1
 
+    # dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=False ) 
     dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=True ) 
 
     x = random.normal(key, (state_size,))
@@ -94,9 +95,9 @@ if __name__ == "__main__":
     # print("f = ",   dynamics.f(x,u,i))
     print("fx = ",  dynamics.f_x(x,u,i))
     print("fu = ",  dynamics.f_u(x,u,i))
-    print("fxx = ", dynamics.f_xx(x,u,i))
-    print("fux = ", dynamics.f_ux(x,u,i))
-    print("fuu = ", dynamics.f_uu(x,u,i))
+    # print("fxx = ", dynamics.f_xx(x,u,i))
+    # print("fux = ", dynamics.f_ux(x,u,i))
+    # print("fuu = ", dynamics.f_uu(x,u,i))
 
     cost = AutoDiffCost( l, l_terminal, state_size, action_size )
 
