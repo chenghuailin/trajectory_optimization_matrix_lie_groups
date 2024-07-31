@@ -264,10 +264,11 @@ class iLQR(BaseController):
         for i in range(N):
             x = xs[i]
             u = us[i]
+            # print("In the forward rollout code, u is ", u)
 
             xs[i + 1] = self.dynamics.f(x, u, i)
             F_x[i] = self.dynamics.f_x(x, u, i)
-            F_u[i] = self.dynamics.f_u(x, u, i)
+            F_u[i] = self.dynamics.f_u(x, u, i)[:, np.newaxis]
 
             L[i] = self.cost.l(x, u, i, terminal=False)
             L_x[i] = self.cost.l_x(x, u, i, terminal=False)
