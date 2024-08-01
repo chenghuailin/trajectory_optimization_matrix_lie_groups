@@ -21,24 +21,10 @@ def f(x, u):
     x1, x2 = x
 
     if isinstance(u, jnp.ndarray) and (u.shape == (1,)):
-        # if test_flag == 1:
-        #     print("In the controller code, u is ", u)
         u, = u
 
     dx1 = x2
     dx2 = - (g / l) * jnp.cos(x1) + (1 / (m * (l**2) )) * u # (u**2)
-
-    # print("dx1 = ", dx1)
-    # print("dx2 = ", dx2)
-
-    # x1, x2 = x
-    # u1, u2 = u
-    # dx1 = x2
-    # dx2 = - (g / l) * jnp.cos(x1) + (1 / (m * (l**2) )) * u1 + u2
-
-    # x1, x2 = x
-    # dx1 = x2
-    # dx2 = u
 
     return jnp.array([dx1, dx2])
 
@@ -70,6 +56,12 @@ def l_terminal(x,i):
     x_diff = x - x_goal
     Q_terminal = jnp.diag( jnp.array([1000,50]) )
     return 0.5 * x_diff.T @ Q_terminal @ x_diff
+
+def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, J_hist):
+    J_hist.append(J_opt)
+    info = "converged" if converged else ("accepted" if accepted else "failed")
+    final_state = xs[-1]
+    print("iteration", iteration_count, info, J_opt, final_state)
     
 
 
@@ -78,41 +70,41 @@ if __name__ == "__main__":
     state_size = 2
     action_size = 1
 
-    # dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=False ) 
-    dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=True ) 
-
-    x = random.normal(key, (state_size,))
-    u = random.normal(key, (action_size,))
-    i = 1
-
-    print("x = ",x)
-    print("u = ",x)
-
-    print("f = ",   dynamics.f(x,u,i))
-    print("fx = ",  dynamics.f_x(x,u,i))
-    print("fu = ",  dynamics.f_u(x,u,i))
-    print("fxx = ", dynamics.f_xx(x,u,i))
-    print("fux = ", dynamics.f_ux(x,u,i))
-    print("fuu = ", dynamics.f_uu(x,u,i))
-
     cost = AutoDiffCost( l, l_terminal, state_size, action_size )
-
-    print("l = ",   cost.l(x,u,i))
-    print("lx = ",  cost.l_x(x,u,i))
-    print("lu = ",  cost.l_u(x,u,i))
-    print("lxx = ", cost.l_xx(x,u,i))
-    print("luu = ", cost.l_uu(x,u,i))
-
-    dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=True ) 
-    cost = AutoDiffCost( l, l_terminal, state_size, action_size )
-
     N = 200
-    ilqr = iLQR(dynamics, cost, N)
 
+    """
+    ===========================
+    DDP
+    ===========================
+    """
+
+    # print("=========== ddp iteration start ===========")
+
+    # dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=True ) 
+
+    # ilqr = iLQR(dynamics, cost, N)
+    # x0 = np.zeros(state_size)
+    # us_init = np.zeros(N)
+
+    # xs_ddp, us_ddp, J_ddp = ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
+
+    """
+    ===========================
+    ILQR
+    ===========================
+    """
+
+    print("=========== ilqr iteration start ===========")
+
+    dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=False ) 
+
+    ilqr = iLQR(dynamics, cost, N)
     x0 = np.zeros(state_size)
     us_init = np.zeros(N)
 
-    xs, us = ilqr.fit(x0, us_init, n_iterations=200)
+    J_hist_ilqr = []
+    xs_ilqr, us_ilqr, J_ilqr = ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
 
     """
@@ -121,14 +113,24 @@ if __name__ == "__main__":
     ===========================
     """
 
+    # plt.figure()
+    # plt.plot( xs_ddp, label=['theta','theta_dot'] )
+    # plt.title('DDP')
+    # plt.xlabel('Time')
+    # plt.ylabel('State')
+    # plt.legend()
+    # plt.grid()
+    # plt.show()
+
     plt.figure()
-    plt.plot( xs, label=['theta','theta_dot'] )
-    plt.title('DDP State Evolution')
+    plt.plot( xs_ilqr, label=['theta','theta_dot'] )
+    plt.title('ILQR')
     plt.xlabel('Time')
     plt.ylabel('State')
     plt.legend()
     plt.grid()
     plt.show()
+
 
     
     
