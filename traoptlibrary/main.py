@@ -79,15 +79,15 @@ if __name__ == "__main__":
     ===========================
     """
 
-    # print("=========== ddp iteration start ===========")
+    print("=========== ddp iteration start ===========")
 
-    # dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=True ) 
+    dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=True ) 
 
-    # ilqr = iLQR(dynamics, cost, N)
-    # x0 = np.zeros(state_size)
-    # us_init = np.zeros(N)
+    ilqr = iLQR(dynamics, cost, N)
+    x0 = np.zeros(state_size)
+    us_init = np.zeros(N)
 
-    # xs_ddp, us_ddp, J_ddp = ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
+    xs_ddp, us_ddp, J_ddp = ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
     """
     ===========================
@@ -113,14 +113,14 @@ if __name__ == "__main__":
     ===========================
     """
 
-    # plt.figure()
-    # plt.plot( xs_ddp, label=['theta','theta_dot'] )
-    # plt.title('DDP')
-    # plt.xlabel('Time')
-    # plt.ylabel('State')
-    # plt.legend()
-    # plt.grid()
-    # plt.show()
+    plt.figure()
+    plt.plot( xs_ddp, label=['theta','theta_dot'] )
+    plt.title('DDP')
+    plt.xlabel('Time')
+    plt.ylabel('State')
+    plt.legend()
+    plt.grid()
+    plt.show()
 
     plt.figure()
     plt.plot( xs_ilqr, label=['theta','theta_dot'] )
