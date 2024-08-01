@@ -21,14 +21,12 @@ def f(x, u):
     x1, x2 = x
 
     if isinstance(u, jnp.ndarray) and (u.shape == (1,)):
-        if test_flag == 1:
-            print("In the controller code, u is ", u)
+        # if test_flag == 1:
+        #     print("In the controller code, u is ", u)
         u, = u
 
     dx1 = x2
     dx2 = - (g / l) * jnp.cos(x1) + (1 / (m * (l**2) )) * u # (u**2)
-
-    # print("u = ", u)
 
     # print("dx1 = ", dx1)
     # print("dx2 = ", dx2)
@@ -60,7 +58,7 @@ def fd_rk4(x, u, i, dt):
 
 fd_rk4_dt = partial( fd_rk4, dt = dt )
 
-x_goal = jnp.array([-jnp.pi/2, 0])
+x_goal = jnp.array([jnp.pi/2, 0])
 
 def l(x,u,i):
     R = 1
@@ -87,17 +85,15 @@ if __name__ == "__main__":
     u = random.normal(key, (action_size,))
     i = 1
 
-    test_flag = 0
-
     print("x = ",x)
     print("u = ",x)
 
-    # print("f = ",   dynamics.f(x,u,i))
+    print("f = ",   dynamics.f(x,u,i))
     print("fx = ",  dynamics.f_x(x,u,i))
     print("fu = ",  dynamics.f_u(x,u,i))
-    # print("fxx = ", dynamics.f_xx(x,u,i))
-    # print("fux = ", dynamics.f_ux(x,u,i))
-    # print("fuu = ", dynamics.f_uu(x,u,i))
+    print("fxx = ", dynamics.f_xx(x,u,i))
+    print("fux = ", dynamics.f_ux(x,u,i))
+    print("fuu = ", dynamics.f_uu(x,u,i))
 
     cost = AutoDiffCost( l, l_terminal, state_size, action_size )
 
@@ -107,15 +103,37 @@ if __name__ == "__main__":
     print("lxx = ", cost.l_xx(x,u,i))
     print("luu = ", cost.l_uu(x,u,i))
 
-    test_flag = 1
+    dynamics = AutoDiffDynamics( fd_rk4_dt , state_size, action_size, hessians=True ) 
+    cost = AutoDiffCost( l, l_terminal, state_size, action_size )
 
-    N = 300
+    N = 200
     ilqr = iLQR(dynamics, cost, N)
 
     x0 = np.zeros(state_size)
     us_init = np.zeros(N)
 
     xs, us = ilqr.fit(x0, us_init, n_iterations=200)
+
+
+    """
+    ===========================
+    Result Visualization
+    ===========================
+    """
+
+    plt.figure()
+    plt.plot( xs, label=['theta','theta_dot'] )
+    plt.title('DDP State Evolution')
+    plt.xlabel('Time')
+    plt.ylabel('State')
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    
+    
+
+
 
 
 
