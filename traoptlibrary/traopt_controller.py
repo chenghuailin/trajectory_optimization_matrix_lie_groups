@@ -102,7 +102,7 @@ class iLQR(BaseController):
         converged = False
         for iteration in range(n_iterations):
             accepted = False
-            print("Outer Iteration: ", iteration)
+            print("Iteration: ", iteration)
 
             # Forward rollout only if it needs to be recomputed.
             if changed:
@@ -271,7 +271,8 @@ class iLQR(BaseController):
 
             xs[i + 1] = self.dynamics.f(x, u, i)
             F_x[i] = self.dynamics.f_x(x, u, i)
-            F_u[i] = self.dynamics.f_u(x, u, i)[:, np.newaxis]
+            F_u[i] = self.dynamics.f_u(x, u, i)
+            # F_u[i] = self.dynamics.f_u(x, u, i)[:, np.newaxis]
 
             L[i] = self.cost.l(x, u, i, terminal=False)
             L_x[i] = self.cost.l_x(x, u, i, terminal=False)
@@ -282,6 +283,13 @@ class iLQR(BaseController):
 
             if self._use_hessians:
                 F_xx[i] = self.dynamics.f_xx(x, u, i)
+
+                # print("Shpae of F_ux[i] is ", F_ux[i].shape)
+                # print("Shpae of dynamics.f_ux is ", self.dynamics.f_ux(x, u, i).shape)
+                # print("x is ",x)
+                # print("u is ",u)
+                # print("f_ux is", self.dynamics.f_ux(x, u, i))
+
                 F_ux[i] = self.dynamics.f_ux(x, u, i)
                 F_uu[i] = self.dynamics.f_uu(x, u, i)
 
