@@ -97,6 +97,10 @@ class iLQR(BaseController):
         K = self._K
 
         J_hist = []
+        xs_hist = []
+        us_hist = []
+        # xs_hist = np.array()
+        # us_hist = np.array()
 
         changed = True
         converged = False
@@ -153,7 +157,7 @@ class iLQR(BaseController):
                     break
 
             if on_iteration:
-                on_iteration(iteration, xs, us, J_opt, accepted, converged, J_hist)
+                on_iteration(iteration, xs, us, J_opt, accepted, converged, J_hist, xs_hist, us_hist)
 
             if converged:
                 break
@@ -164,7 +168,7 @@ class iLQR(BaseController):
         self._nominal_xs = xs
         self._nominal_us = us
 
-        return xs, us, J_hist
+        return xs, us, J_hist, xs_hist, us_hist
 
     def _control(self, xs, us, k, K, alpha=1.0):
         """Applies the controls for a given trajectory.
