@@ -122,11 +122,19 @@ class iLQR(BaseController):
                  F_uu) = self._forward_rollout(x0, us)
                 J_opt = L.sum()
                 changed = False
+            
+            end_time = time.perf_counter()
+            time_calc = end_time - start_time
+            print("Iteration:", iteration, "Dynamics Rollout Finished, Used Time:", time_calc )
 
             try:
                 # Backward pass.
                 k, K = self._backward_pass(F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
                                            F_xx, F_ux, F_uu)
+                
+                end_time = time.perf_counter()
+                time_calc = end_time - start_time   
+                print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
 
                 # Backtracking line search.
                 for alpha in alphas:
@@ -167,6 +175,10 @@ class iLQR(BaseController):
                 # Quu was not positive-definite and this diverged.
                 # Try again with a higher regularization term.
                 warnings.warn(str(e))
+
+            end_time = time.perf_counter()
+            time_calc = end_time - start_time   
+            print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
 
             # accepted = True
             if not accepted:

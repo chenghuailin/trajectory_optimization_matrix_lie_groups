@@ -224,7 +224,7 @@ if __name__ == "__main__":
             axs[j].set_xlabel('TimeStep')
             axs[j].set_ylabel('State '+str(j) )
             axs[j].legend()
-            axs[j].grid()
+            axs[j].grid(True)
 
 
     fig, axs = plt.subplots(state_size, num=5)
@@ -236,7 +236,7 @@ if __name__ == "__main__":
             axs[j].set_xlabel('TimeStep')
             axs[j].set_ylabel('State '+str(j) )
             axs[j].legend()
-            axs[j].grid()
+            axs[j].grid(True)
 
 
     fig_ilqr, axs_ilqr = plt.subplots(state_size, num=6)
