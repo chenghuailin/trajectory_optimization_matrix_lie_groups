@@ -15,51 +15,48 @@ import math
 seed = 24234156
 key = random.key(seed)
 
-dt = 0.05
-
-def f(x, u):
-    ''' Fixed Origin Pendulum Dynamics (Full Actuated System) '''
-
-    g = 9.8 # m/s^2
-    m = 2 # kg
-    l = 0.1 # m
-    
-    x1, x2 = x
-
-    if (isinstance(u, jnp.ndarray) or isinstance(u, np.ndarray)) and (u.shape == (1,)):
-        u, = u
-
-    dx1 = x2
-    dx2 = - (g / l) * jnp.cos(x1) + (1 / (m * (l**2) )) * u # (u**2)
-
-    return jnp.array([dx1, dx2])
-
+dt = 0.02
 
 # def f(x, u):
-#     ''' Car Pole System Dynamics (Underactuated System) '''
+#     ''' Fixed Origin Pendulum Dynamics (Full Actuated System) '''
 
-#     mc = 1
-#     mp = 1
-#     l = 1
-#     g = 9.8
+#     g = 9.8 # m/s^2
+#     m = 2 # kg
+#     l = 0.1 # m
     
-#     x1, x2, x3, x4 = x
+#     x1, x2 = x
+
 #     if (isinstance(u, jnp.ndarray) or isinstance(u, np.ndarray)) and (u.shape == (1,)):
 #         u, = u
 
 #     dx1 = x2
-#     dx2 = 1/( mc + mp * (math.sin(x3)**2) ) * ( u + mp * math.sin(x3) * ( l * (x4**2) + g * math.cos(x3) ) )
-#     dx3 = x4
-#     dx4 = 1/( l*mc + l*mp*(math.sin(x3)**2) ) * ( - u*math.cos(x3) - mp * l * (x4**2) * math.cos(x3) * math.sin(x3) - (mc+mp)*g*math.sin(x3) )
+#     dx2 = - (g / l) * jnp.cos(x1) + (1 / (m * (l**2) )) * u # (u**2)
 
-#     return jnp.array([dx1, dx2, dx3, dx4])
+#     return jnp.array([dx1, dx2])
+
+
+def f(x, u):
+    ''' Car Pole System Dynamics (Underactuated System) '''
+
+    mc = 1
+    mp = 1
+    l = 1
+    g = 9.8
+    
+    x1, x2, x3, x4 = x
+    if (isinstance(u, jnp.ndarray) or isinstance(u, np.ndarray)) and (u.shape == (1,)):
+        u, = u
+
+    dx1 = x2
+    dx2 = 1/( mc + mp * (jnp.sin(x3)**2) ) * ( u + mp * jnp.sin(x3) * ( l * (x4**2) + g * jnp.cos(x3) ) )
+    dx3 = x4
+    dx4 = 1/( l*mc + l*mp*(jnp.sin(x3)**2) ) * ( - u*jnp.cos(x3) - mp * l * (x4**2) * jnp.cos(x3) * jnp.sin(x3) - (mc+mp)*g*jnp.sin(x3) )
+
+    return jnp.array([dx1, dx2, dx3, dx4])
 
 
 
 def fd_rk4(x, u, i, dt):
-    g = 9.8 # m/s^2
-    m = 2 # kg
-    l = 0.5 # m
 
     s1 = f(x,u)
     s2 = f( x+ dt/2*s1, u )
@@ -78,35 +75,42 @@ def l(x,u,i):
 
     R = 20
     x_diff = x - x_goal
-    Q = jnp.diag( jnp.array([1000,50]) )
+    # Q = jnp.diag( jnp.array([1000,50]) )
+    Q = jnp.diag( jnp.array([1000,100,1000,100]) )
     return 0.5 * u * R * u + 0.5 * x_diff.T @ Q @ x_diff
 
 def l_terminal(x,i):
     x_diff = x - x_goal
-    Q_terminal = jnp.diag( jnp.array([1000,50]) )
+    # Q_terminal = jnp.diag( jnp.array([1000,50]) )
+    Q_terminal = jnp.diag( jnp.array([1000,100,1000,100]) )
     return 0.5 * x_diff.T @ Q_terminal @ x_diff
 
-def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, J_hist, xs_hist, us_hist):
+def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, alpha, mu, J_hist, xs_hist, us_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
     info = "converged" if converged else ("accepted" if accepted else "failed")
     final_state = xs[-1]
-    print("iteration", iteration_count, info, J_opt, final_state)
+    print("iteration", iteration_count, info, J_opt, final_state, alpha, mu)
     
 
 
 if __name__ == "__main__":
 
-    state_size = 2
+    # state_size = 2
+    state_size = 4
     action_size = 1
 
     cost = AutoDiffCost( l, l_terminal, state_size, action_size )
-    N = 20
+    N = 200
 
-    x0 = jnp.array([jnp.pi/2+0.3, 0])
     us_init = np.zeros((N, action_size))
-    x_goal = jnp.array([jnp.pi/2, 0])
+
+    # x0 = jnp.array([jnp.pi/2+0.3, 0])
+    # x_goal = jnp.array([jnp.pi/2, 0])
+
+    x0 = jnp.array([ 9., 0., 0., 0.])
+    x_goal = jnp.array([ 10., 0., jnp.pi, 0])
 
     """
     ===========================
@@ -179,7 +183,8 @@ if __name__ == "__main__":
     """
 
     plt.figure(1)
-    plt.plot( xs_ddp, label=['theta','theta_dot'] )
+    for j in range( state_size ):
+        plt.plot( xs_ddp[:,j], label = 'State '+str(j) )
     plt.title('DDP Final Trajectory')
     plt.xlabel('TimeStep')
     plt.ylabel('State')
@@ -187,7 +192,8 @@ if __name__ == "__main__":
     plt.grid()
 
     plt.figure(2)
-    plt.plot( xs_ilqr, label=['theta','theta_dot'] )
+    for j in range( state_size ):
+        plt.plot( xs_ilqr[:,j], label = 'State '+str(j) )
     plt.title('ILQR Final Trajectory')
     plt.xlabel('TimeStep')
     plt.ylabel('State')
@@ -209,60 +215,49 @@ if __name__ == "__main__":
     us_hist_ddp = np.array(us_hist_ddp)
 
 
-    fig, axs = plt.subplots(2, num=4)
+    fig, axs = plt.subplots(state_size, num=4)
     fig.suptitle('iLQR Trajectory Evolution')
     for i in range( xs_hist_ilqr.shape[0] ):
-        axs[0].plot( xs_hist_ilqr[i,:,0], label = i )
-        axs[1].plot( xs_hist_ilqr[i,:,1], label = i )
+        for j in range( state_size ):
+            axs[j].plot( xs_hist_ilqr[i,:,j], label = str(i) )
 
-    axs[0].set_xlabel('TimeStep')
-    axs[0].set_ylabel('Theta')
-    axs[0].legend()
-    axs[0].grid()
-
-    axs[1].set_xlabel('TimeStep')
-    axs[1].set_ylabel('Theta Dot')
-    axs[1].legend()
-    axs[1].grid()
+            axs[j].set_xlabel('TimeStep')
+            axs[j].set_ylabel('State '+str(j) )
+            axs[j].legend()
+            axs[j].grid()
 
 
-    fig, axs = plt.subplots(2, num=5)
+    fig, axs = plt.subplots(state_size, num=5)
     fig.suptitle('DDP Trajectory Evolution')
     for i in range( xs_hist_ddp.shape[0] ):
-        axs[0].plot( xs_hist_ddp[i,:,0], label = i )
-        axs[1].plot( xs_hist_ddp[i,:,1], label = i )
+        for j in range( state_size ):
+            axs[j].plot( xs_hist_ddp[i,:,0], label = str(i) )
 
-    axs[0].set_xlabel('TimeStep')
-    axs[0].set_ylabel('Theta')
-    axs[0].legend()
-    axs[0].grid()
-
-    axs[1].set_xlabel('TimeStep')
-    axs[1].set_ylabel('Theta Dot')
-    axs[1].legend()
-    axs[1].grid()
+            axs[j].set_xlabel('TimeStep')
+            axs[j].set_ylabel('State '+str(j) )
+            axs[j].legend()
+            axs[j].grid()
 
 
-
-    fig_ilqr, axs_ilqr = plt.subplots(2, num=6)
+    fig_ilqr, axs_ilqr = plt.subplots(state_size, num=6)
     fig.suptitle('iLQR Trajectory Evolution')
-    axs_ilqr[0].set_ylim( np.min(xs_hist_ilqr[:,:,0])-0.2, np.max(xs_hist_ilqr[:,:,0])+0.2 ) 
-    axs_ilqr[1].set_ylim( np.min(xs_hist_ilqr[:,:,1])-0.2, np.max(xs_hist_ilqr[:,:,1])+0.2 )
+    for j in range( state_size ):
+        axs_ilqr[j].set_ylim( np.min(xs_hist_ilqr[:,:,j])-0.2, np.max(xs_hist_ilqr[:,:,j])+0.2 ) 
 
-    axs_ilqr[0].grid()
-    # axs_ilqr[0].set_xlabel('TimeStep')
-    axs_ilqr[0].set_ylabel('Theta')
-    axs_ilqr[1].grid()
-    axs_ilqr[1].set_xlabel('TimeStep')
-    axs_ilqr[1].set_ylabel('Theta Dot')
+        axs_ilqr[j].grid()
+        axs_ilqr[j].set_ylabel('State '+str(j))
+    
+    axs_ilqr[j].set_xlabel('TimeStep')
 
-    line0_ilqr, = axs_ilqr[0].plot(xs_hist_ilqr[0,:,0],lw=2)
-    line1_ilqr, = axs_ilqr[1].plot(xs_hist_ilqr[0,:,1],lw=2)
+    line_ilqr_list = []
+    for j in range( state_size ):
+        line_ilqr, = axs_ilqr[j].plot(xs_hist_ilqr[0,:,j],lw=2)
+        line_ilqr_list.append(line_ilqr)
 
     def func_animation_ilqr(i):
-        line0_ilqr.set_ydata(xs_hist_ilqr[i,:,0])
-        line1_ilqr.set_ydata(xs_hist_ilqr[i,:,1])
-        return line0_ilqr, line1_ilqr
+        for j in range( state_size ):
+            line_ilqr_list[j].set_ydata(xs_hist_ilqr[i,:,j])
+            return line_ilqr_list
 
     animation_ilqr = FuncAnimation(fig_ilqr,
                         func = func_animation_ilqr,
@@ -271,25 +266,25 @@ if __name__ == "__main__":
     
 
 
-    fig_ddp, axs_ddp = plt.subplots(2, num=7)
+    fig_ddp, axs_ddp = plt.subplots(state_size, num=7)
     fig.suptitle('DDP Trajectory Evolution')
-    axs_ddp[0].set_ylim( np.min(xs_hist_ddp[:,:,0])-0.2, np.max(xs_hist_ddp[:,:,0])+0.2 ) 
-    axs_ddp[1].set_ylim( np.min(xs_hist_ddp[:,:,1])-0.2, np.max(xs_hist_ddp[:,:,1])+0.2 )
+    for j in range( state_size ):
+        axs_ddp[j].set_ylim( np.min(xs_hist_ddp[:,:,j])-0.2, np.max(xs_hist_ddp[:,:,j])+0.2 ) 
 
-    axs_ddp[0].grid()
-    # axs_ddp[0].set_xlabel('TimeStep')
-    axs_ddp[0].set_ylabel('Theta')
-    axs_ddp[1].grid()
-    axs_ddp[1].set_xlabel('TimeStep')
-    axs_ddp[1].set_ylabel('Theta Dot')
+        axs_ddp[j].grid()
+        axs_ddp[j].set_ylabel('State '+str(j))
 
-    line0_ddp, = axs_ddp[0].plot(xs_hist_ddp[0,:,0],lw=2)
-    line1_ddp, = axs_ddp[1].plot(xs_hist_ddp[0,:,1],lw=2)
+    axs_ddp[j].set_xlabel('TimeStep')
+
+    line_ddp_list = []
+    for j in range( state_size ):
+        line_ddp, = axs_ddp[j].plot(xs_hist_ddp[0,:,j],lw=2)
+        line_ddp_list.append(line_ddp)
 
     def func_animation_ddp(i):
-        line0_ddp.set_ydata(xs_hist_ddp[i,:,0])
-        line1_ddp.set_ydata(xs_hist_ddp[i,:,1])
-        return line0_ddp, line1_ddp
+        for j in range( state_size ):
+            line_ddp_list[j].set_ydata(xs_hist_ddp[i,:,j])
+            return line_ilqr_list
 
     animation_ddp = FuncAnimation(fig_ddp,
                         func = func_animation_ddp,

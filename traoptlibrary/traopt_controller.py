@@ -1,6 +1,7 @@
 import abc
 import warnings
 import numpy as np
+import time
 
 class BaseController():
 
@@ -87,7 +88,11 @@ class iLQR(BaseController):
         """
         # Reset regularization term.
         self._mu = 1.0
+        # self._mu = 0.0
         self._delta = self._delta_0
+
+        # Add time 
+        start_time = time.perf_counter()
 
         # Backtracking line search candidates 0 < alpha <= 1.
         alphas = 1.1**(-np.arange(10)**2)
@@ -106,7 +111,10 @@ class iLQR(BaseController):
         converged = False
         for iteration in range(n_iterations):
             accepted = False
-            print("Iteration: ", iteration)
+            
+            end_time = time.perf_counter()
+            time_calc = end_time - start_time
+            print("Iteration:", iteration, ", Used Time:", time_calc )
 
             # Forward rollout only if it needs to be recomputed.
             if changed:
@@ -143,11 +151,24 @@ class iLQR(BaseController):
                         # Accept this.
                         accepted = True
                         break
+
+                # alpha = 1
+                # xs_new, us_new = self._control(xs, us, k, K, alpha)
+                # J_new = self._trajectory_cost(xs_new, us_new)
+
+                # J_opt = J_new
+                # xs = xs_new
+                # us = us_new
+                # changed = True
+                # accepted = True
+
+
             except np.linalg.LinAlgError as e:
                 # Quu was not positive-definite and this diverged.
                 # Try again with a higher regularization term.
                 warnings.warn(str(e))
 
+            # accepted = True
             if not accepted:
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
@@ -157,7 +178,8 @@ class iLQR(BaseController):
                     break
 
             if on_iteration:
-                on_iteration(iteration, xs, us, J_opt, accepted, converged, J_hist, xs_hist, us_hist)
+                on_iteration(iteration, xs, us, J_opt, accepted, converged, alpha, self._mu,  
+                             J_hist, xs_hist, us_hist)
 
             if converged:
                 break
