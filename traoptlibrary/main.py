@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from  functools import partial
 import time
-import math
 
 
 seed = 24234156

@@ -1,7 +1,7 @@
 import abc
 import numpy as np
 import jax.numpy as jnp
-from jax import jacfwd, hessian
+from jax import jacfwd, hessian, jit
 
 
 class BaseDynamics():
@@ -151,15 +151,15 @@ class AutoDiffDynamics(BaseDynamics):
         self._state_size = state_size
         self._action_size = action_size
 
-        self._f = f
-        self._f_x = jacfwd(f)
-        self._f_u = jacfwd(f, argnums=1)
+        self._f = jit(f)
+        self._f_x = jit(jacfwd(f))
+        self._f_u = jit(jacfwd(f, argnums=1))
 
         self._has_hessians = hessians
         if hessians:
-            self._f_xx = hessian(f, argnums=0)
-            self._f_ux = jacfwd( jacfwd(f, argnums=1) )
-            self._f_uu = hessian(f, argnums=1)
+            self._f_xx = jit(hessian(f, argnums=0))
+            self._f_ux = jit(jacfwd( jacfwd(f, argnums=1) ))
+            self._f_uu = jit(hessian(f, argnums=1))
 
         super(AutoDiffDynamics, self).__init__()
 
