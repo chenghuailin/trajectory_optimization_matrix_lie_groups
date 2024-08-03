@@ -2,7 +2,7 @@
 
 import abc
 import numpy as np
-from jax import jacfwd, hessian
+from jax import jacfwd, hessian, jit
 
 class BaseCost():
 
@@ -134,20 +134,20 @@ class AutoDiffCost(BaseCost):
         self._state_size = state_size
         self._action_size = action_size
 
-        self._l = l
-        self._l_x = jacfwd(l)
-        self._l_u = jacfwd(l, argnums=1)
+        self._l = jit(l)
+        self._l_x = jit(jacfwd(l))
+        self._l_u = jit(jacfwd(l, argnums=1))
 
-        self._l_xx = hessian(l, argnums=0)
-        self._l_ux = jacfwd( jacfwd(l, argnums=1) )
-        self._l_uu = hessian(l, argnums=1)
+        self._l_xx = jit(hessian(l, argnums=0))
+        self._l_ux = jit(jacfwd( jacfwd(l, argnums=1) ))
+        self._l_uu = jit(hessian(l, argnums=1))
 
         # Terminal cost only depends on x, so we only need to evaluate the x
         # partial derivatives.
 
-        self._l_terminal = l_terminal
-        self._l_x_terminal = jacfwd(l_terminal)
-        self._l_xx_terminal = hessian(l_terminal)
+        self._l_terminal = jit(l_terminal)
+        self._l_x_terminal = jit(jacfwd(l_terminal))
+        self._l_xx_terminal = jit(hessian(l_terminal))
 
         super(AutoDiffCost, self).__init__()
 
