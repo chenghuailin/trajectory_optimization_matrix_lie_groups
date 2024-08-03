@@ -14,7 +14,7 @@ import time
 seed = 24234156
 key = random.key(seed)
 
-dt = 0.02
+dt = 0.01
 
 # def f(x, u):
 #     ''' Fixed Origin Pendulum Dynamics (Full Actuated System) '''
@@ -72,16 +72,16 @@ def l(x,u,i):
     if (isinstance(u, jnp.ndarray) or isinstance(u, np.ndarray)) and (u.shape == (1,)):
         u, = u
 
-    R = 20
+    R = 80
     x_diff = x - x_goal
     # Q = jnp.diag( jnp.array([1000,50]) )
-    Q = jnp.diag( jnp.array([1000,100,1000,100]) )
+    Q = jnp.diag( jnp.array([100,100,10000,100]) )
     return 0.5 * u * R * u + 0.5 * x_diff.T @ Q @ x_diff
 
 def l_terminal(x,i):
     x_diff = x - x_goal
     # Q_terminal = jnp.diag( jnp.array([1000,50]) )
-    Q_terminal = jnp.diag( jnp.array([1000,100,1000,100]) )
+    Q_terminal = jnp.diag( jnp.array([100,100,10000,100]) )
     return 0.5 * x_diff.T @ Q_terminal @ x_diff
 
 def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, alpha, mu, J_hist, xs_hist, us_hist):
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     action_size = 1
 
     cost = AutoDiffCost( l, l_terminal, state_size, action_size )
-    N = 200
+    N = 800
 
     us_init = np.zeros((N, action_size))
 
@@ -208,6 +208,7 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid()
 
+
     xs_hist_ilqr = np.array(xs_hist_ilqr)
     us_hist_ilqr = np.array(us_hist_ilqr)
     xs_hist_ddp = np.array(xs_hist_ddp)
@@ -220,75 +221,77 @@ if __name__ == "__main__":
         for j in range( state_size ):
             axs[j].plot( xs_hist_ilqr[i,:,j], label = str(i) )
 
-            axs[j].set_xlabel('TimeStep')
             axs[j].set_ylabel('State '+str(j) )
             axs[j].legend()
             axs[j].grid(True)
+        
+        axs[j].set_xlabel('TimeStep')
 
 
     fig, axs = plt.subplots(state_size, num=5)
     fig.suptitle('DDP Trajectory Evolution')
     for i in range( xs_hist_ddp.shape[0] ):
         for j in range( state_size ):
-            axs[j].plot( xs_hist_ddp[i,:,0], label = str(i) )
+            axs[j].plot( xs_hist_ddp[i,:,j], label = str(i) )
 
-            axs[j].set_xlabel('TimeStep')
             axs[j].set_ylabel('State '+str(j) )
             axs[j].legend()
             axs[j].grid(True)
 
+        axs[j].set_xlabel('TimeStep')
 
-    fig_ilqr, axs_ilqr = plt.subplots(state_size, num=6)
-    fig.suptitle('iLQR Trajectory Evolution')
-    for j in range( state_size ):
-        axs_ilqr[j].set_ylim( np.min(xs_hist_ilqr[:,:,j])-0.2, np.max(xs_hist_ilqr[:,:,j])+0.2 ) 
 
-        axs_ilqr[j].grid()
-        axs_ilqr[j].set_ylabel('State '+str(j))
+    # fig_ilqr, axs_ilqr = plt.subplots(state_size, num=6)
+    # fig.suptitle('iLQR Trajectory Evolution')
+    # for j in range( state_size ):
+    #     axs_ilqr[j].set_ylim( np.min(xs_hist_ilqr[:,:,j])-0.2, np.max(xs_hist_ilqr[:,:,j])+0.2 ) 
+
+    #     axs_ilqr[j].grid()
+    #     axs_ilqr[j].set_ylabel('State '+str(j))
     
-    axs_ilqr[j].set_xlabel('TimeStep')
+    # axs_ilqr[j].set_xlabel('TimeStep')
 
-    line_ilqr_list = []
-    for j in range( state_size ):
-        line_ilqr, = axs_ilqr[j].plot(xs_hist_ilqr[0,:,j],lw=2)
-        line_ilqr_list.append(line_ilqr)
+    # line_ilqr_list = []
+    # for j in range( state_size ):
+    #     line_ilqr, = axs_ilqr[j].plot(xs_hist_ilqr[0,:,j],lw=2)
+    #     line_ilqr_list.append(line_ilqr)
 
-    def func_animation_ilqr(i):
-        for j in range( state_size ):
-            line_ilqr_list[j].set_ydata(xs_hist_ilqr[i,:,j])
-            return line_ilqr_list
+    # def func_animation_ilqr(i):
+    #     for j in range( state_size ):
+    #         line_ilqr_list[j].set_ydata(xs_hist_ilqr[i,:,j])
+    #         return line_ilqr_list
 
-    animation_ilqr = FuncAnimation(fig_ilqr,
-                        func = func_animation_ilqr,
-                        frames = np.arange(0, xs_hist_ilqr.shape[0]), 
-                        interval = 500)
+    # animation_ilqr = FuncAnimation(fig_ilqr,
+    #                     func = func_animation_ilqr,
+    #                     frames = np.arange(0, xs_hist_ilqr.shape[0]), 
+    #                     interval = 500)
     
 
 
-    fig_ddp, axs_ddp = plt.subplots(state_size, num=7)
-    fig.suptitle('DDP Trajectory Evolution')
-    for j in range( state_size ):
-        axs_ddp[j].set_ylim( np.min(xs_hist_ddp[:,:,j])-0.2, np.max(xs_hist_ddp[:,:,j])+0.2 ) 
+    # fig_ddp, axs_ddp = plt.subplots(state_size, num=7)
+    # fig.suptitle('DDP Trajectory Evolution')
+    # for j in range( state_size ):
+    #     axs_ddp[j].set_ylim( np.min(xs_hist_ddp[:,:,j])-0.2, np.max(xs_hist_ddp[:,:,j])+0.2 ) 
 
-        axs_ddp[j].grid()
-        axs_ddp[j].set_ylabel('State '+str(j))
+    #     axs_ddp[j].grid()
+    #     axs_ddp[j].set_ylabel('State '+str(j))
 
-    axs_ddp[j].set_xlabel('TimeStep')
+    # axs_ddp[j].set_xlabel('TimeStep')
 
-    line_ddp_list = []
-    for j in range( state_size ):
-        line_ddp, = axs_ddp[j].plot(xs_hist_ddp[0,:,j],lw=2)
-        line_ddp_list.append(line_ddp)
+    # line_ddp_list = []
+    # for j in range( state_size ):
+    #     line_ddp, = axs_ddp[j].plot(xs_hist_ddp[0,:,j],lw=2)
+    #     line_ddp_list.append(line_ddp)
 
-    def func_animation_ddp(i):
-        for j in range( state_size ):
-            line_ddp_list[j].set_ydata(xs_hist_ddp[i,:,j])
-            return line_ilqr_list
+    # def func_animation_ddp(i):
+    #     for j in range( state_size ):
+    #         line_ddp_list[j].set_ydata(xs_hist_ddp[i,:,j])
+    #         return line_ilqr_list
 
-    animation_ddp = FuncAnimation(fig_ddp,
-                        func = func_animation_ddp,
-                        frames = np.arange(0, xs_hist_ddp.shape[0]), 
-                        interval = 500)
+    # animation_ddp = FuncAnimation(fig_ddp,
+    #                     func = func_animation_ddp,
+    #                     frames = np.arange(0, xs_hist_ddp.shape[0]), 
+    #                     interval = 500)
      
 
     plt.show()
