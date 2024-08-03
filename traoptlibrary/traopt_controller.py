@@ -24,6 +24,11 @@ class BaseController():
         raise NotImplementedError
     
 
+class PDViolationError(Exception):
+    """Custom exception class for handling positive definite violation errors"""    
+    pass
+
+
 class iLQR(BaseController):
 
     """Finite Horizon Iterative Linear Quadratic Regulator."""
@@ -87,8 +92,8 @@ class iLQR(BaseController):
                 us: optimal control path [N, action_size].
         """
         # Reset regularization term.
-        self._mu = 1.0
-        # self._mu = 0.0
+        # self._mu = 1.0
+        self._mu = 0.0
         self._delta = self._delta_0
 
         # Add time 
@@ -125,7 +130,7 @@ class iLQR(BaseController):
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
-            print("Iteration:", iteration, "Dynamics Rollout Finished, Used Time:", time_calc )
+            # print("Iteration:", iteration, "Dynamics Rollout Finished, Used Time:", time_calc )
 
             try:
                 # Backward pass.
@@ -134,7 +139,7 @@ class iLQR(BaseController):
                 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
+                # print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
 
                 # Backtracking line search.
                 for alpha in alphas:
@@ -178,9 +183,9 @@ class iLQR(BaseController):
 
             end_time = time.perf_counter()
             time_calc = end_time - start_time   
-            print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
+            # print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
 
-            # accepted = True
+            accepted = True
             if not accepted:
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
@@ -389,6 +394,12 @@ class iLQR(BaseController):
                 Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
                                                      L_u[i], L_xx[i], L_ux[i],
                                                      L_uu[i], V_x, V_xx)
+                
+            try:
+                if np.any( Q_uu <= 0):
+                    raise PDViolationError("Quu is not PD")
+            except PDViolationError as e:
+                print(f"Positive Definite Assumption Violation: {e}")
 
             # Eq (6).
             k[i] = -np.linalg.solve(Q_uu, Q_u)
