@@ -72,7 +72,7 @@ def l(x,u,i):
     if (isinstance(u, jnp.ndarray) or isinstance(u, np.ndarray)) and (u.shape == (1,)):
         u, = u
 
-    R = 80
+    R = 200
     x_diff = x - x_goal
     # Q = jnp.diag( jnp.array([1000,50]) )
     Q = jnp.diag( jnp.array([100,100,10000,100]) )
@@ -93,7 +93,6 @@ def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, alpha, mu,
     print("iteration", iteration_count, info, J_opt, final_state, alpha, mu)
     
 
-
 if __name__ == "__main__":
 
     # state_size = 2
@@ -101,13 +100,14 @@ if __name__ == "__main__":
     action_size = 1
 
     cost = AutoDiffCost( l, l_terminal, state_size, action_size )
-    N = 800
+    N = 400
 
     us_init = np.zeros((N, action_size))
 
-    # x0 = jnp.array([jnp.pi/2+0.3, 0])
+    # x0 = jnp.array([jnp.pi/2+0.1, 0])
     # x_goal = jnp.array([jnp.pi/2, 0])
 
+    # x0 = jnp.array([ 9., 0., jnp.pi-0.2, 0.])
     x0 = jnp.array([ 9., 0., 0., 0.])
     x_goal = jnp.array([ 10., 0., jnp.pi, 0])
 
@@ -215,30 +215,30 @@ if __name__ == "__main__":
     us_hist_ddp = np.array(us_hist_ddp)
 
 
-    fig, axs = plt.subplots(state_size, num=4)
-    fig.suptitle('iLQR Trajectory Evolution')
-    for i in range( xs_hist_ilqr.shape[0] ):
-        for j in range( state_size ):
-            axs[j].plot( xs_hist_ilqr[i,:,j], label = str(i) )
+    # fig, axs = plt.subplots(state_size, num=4)
+    # fig.suptitle('iLQR Trajectory Evolution')
+    # for i in range( xs_hist_ilqr.shape[0] ):
+    #     for j in range( state_size ):
+    #         axs[j].plot( xs_hist_ilqr[i,:,j], label = str(i) )
 
-            axs[j].set_ylabel('State '+str(j) )
-            axs[j].legend()
-            axs[j].grid(True)
+    #         axs[j].set_ylabel('State '+str(j) )
+    #         axs[j].legend()
+    #         axs[j].grid(True)
         
-        axs[j].set_xlabel('TimeStep')
+    #     axs[j].set_xlabel('TimeStep')
 
 
-    fig, axs = plt.subplots(state_size, num=5)
-    fig.suptitle('DDP Trajectory Evolution')
-    for i in range( xs_hist_ddp.shape[0] ):
-        for j in range( state_size ):
-            axs[j].plot( xs_hist_ddp[i,:,j], label = str(i) )
+    # fig, axs = plt.subplots(state_size, num=5)
+    # fig.suptitle('DDP Trajectory Evolution')
+    # for i in range( xs_hist_ddp.shape[0] ):
+    #     for j in range( state_size ):
+    #         axs[j].plot( xs_hist_ddp[i,:,j], label = str(i) )
 
-            axs[j].set_ylabel('State '+str(j) )
-            axs[j].legend()
-            axs[j].grid(True)
+    #         axs[j].set_ylabel('State '+str(j) )
+    #         axs[j].legend()
+    #         axs[j].grid(True)
 
-        axs[j].set_xlabel('TimeStep')
+    #     axs[j].set_xlabel('TimeStep')
 
 
     # fig_ilqr, axs_ilqr = plt.subplots(state_size, num=6)
