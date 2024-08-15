@@ -92,8 +92,8 @@ class iLQR(BaseController):
                 us: optimal control path [N, action_size].
         """
         # Reset regularization term.
-        # self._mu = 1.0
-        self._mu = 0.0
+        self._mu = 1.0
+        # self._mu = 0.0
         self._delta = self._delta_0
 
         # Add time 
@@ -185,7 +185,7 @@ class iLQR(BaseController):
             time_calc = end_time - start_time   
             # print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
 
-            accepted = True
+            # accepted = True
             if not accepted:
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
@@ -395,11 +395,11 @@ class iLQR(BaseController):
                                                      L_u[i], L_xx[i], L_ux[i],
                                                      L_uu[i], V_x, V_xx)
                 
-            try:
-                if np.any( Q_uu <= 0):
-                    raise PDViolationError("Quu is not PD")
-            except PDViolationError as e:
-                print(f"Positive Definite Assumption Violation: {e}")
+            # try:
+            #     if np.any( Q_uu <= 0):
+            #         raise PDViolationError("Quu is not PD")
+            # except PDViolationError as e:
+            #     print(f"Positive Definite Assumption Violation: {e}")
 
             # Eq (6).
             k[i] = -np.linalg.solve(Q_uu, Q_u)
