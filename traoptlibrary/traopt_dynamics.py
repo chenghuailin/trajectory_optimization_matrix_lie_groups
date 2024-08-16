@@ -265,9 +265,22 @@ class AutoDiffDynamics(BaseDynamics):
         return self._f_uu(x,u,i)
     
 
-class ErrorStateSE3Dynamics(BaseDynamics):
+def skew( w ):
+    """Get the isomorphic element in the Lie algebra for SO3, 
+        i.e. the skew symmetric matrix."""
+    if isinstance(w, np.ndarray) or isinstance(w, jnp.ndarray) and w.shape == (3,) or w.shape == (3, 1):
+        return np.array([
+            [0, -w[2], w[1]],
+            [w[2], 0, -w[0]],
+            [-w[1], w[0], 0]
+        ])
+    else:
+        raise ValueError("Input must be a 3d vector")
 
-    """Error-State SE(3) Dynamics Model, with Only First-order Derivative"""
+
+class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
+
+    """Error-State SE(3) Dynamics Model implemented with Jax for Derivatvies"""
 
     def __init__(self, J, X_ref, xi_ref, dt, integration_method="euler",
                     state_size=(6,6), action_size=6, hessians=False, **kwargs):
@@ -318,17 +331,17 @@ class ErrorStateSE3Dynamics(BaseDynamics):
         else:
             raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
         
-        self._f = jit(f)
-        self._f_x = jit(jacfwd(f))
-        self._f_u = jit(jacfwd(f, argnums=1))
+        self._f = jit(self.f)
+        self._f_x = jit(jacfwd(self.f))
+        self._f_u = jit(jacfwd(self.f, argnums=1))
 
         self._has_hessians = hessians
         if hessians:
-            self._f_xx = jit(hessian(f, argnums=0))
-            self._f_ux = jit(jacfwd( jacfwd(f, argnums=1) ))
-            self._f_uu = jit(hessian(f, argnums=1))
+            self._f_xx = jit(hessian(self.f, argnums=0))
+            self._f_ux = jit(jacfwd( jacfwd(self.f, argnums=1) ))
+            self._f_uu = jit(hessian(self.f, argnums=1))
 
-        super(ErrorStateSE3Dynamics, self).__init__()
+        super(ErrorStateSE3AutoDiffDynamics, self).__init__()
 
     @property
     def state_size(self):
@@ -396,26 +409,14 @@ class ErrorStateSE3Dynamics(BaseDynamics):
     def x_ref(self, i) :
         """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
         return self._x_ref(i)
-    
-    def skew( self, w ):
-        """Get the isomorphic element in the Lie algebra for SO3, 
-            i.e. the skew symmetric matrix."""
-        if isinstance(w, np.ndarray) or isinstance(w, jnp.ndarray) and w.shape == (3,) or w.shape == (3, 1):
-            return np.array([
-                [0, -w[2], w[1]],
-                [w[2], 0, -w[0]],
-                [-w[1], w[0], 0]
-            ])
-        else:
-            raise ValueError("Input must be a 3d vector")
 
     def adjoint( self, xi ):
         """ Get the the adjoint matrix representation of Lie Algebra."""
         w = np.array([xi[0], xi[1], xi[2]])
         v = np.array([xi[3], xi[4], xi[5]])
         adx = np.block([
-            [self.skew(w), np.zeros((3, 3))],
-            [self.skew(v), self.skew(w)]
+            [skew(w), np.zeros((3, 3))],
+            [skew(v), skew(w)]
         ])
         return adx
     
@@ -442,8 +443,8 @@ class ErrorStateSE3Dynamics(BaseDynamics):
         v = xi[-3:]
 
         G = np.block([
-            [self.skew( self.Ib @ omega ), self.m * self.skew( v )],
-            [self.m * self.skew( v ), np.zeros((3,3))],        
+            [skew( self.Ib @ omega ), self.m * skew( v )],
+            [self.m * skew( v ), np.zeros((3,3))],        
         ])
         Ht = - self.Jinv @ ( self.coadjoint( xi ) @ self.J + G )
         bt = - self.Jinv @ G @ xi
@@ -567,5 +568,4 @@ class ErrorStateSE3Dynamics(BaseDynamics):
             raise NotImplementedError
 
         return self._f_uu(x,u,i)
-    
     
