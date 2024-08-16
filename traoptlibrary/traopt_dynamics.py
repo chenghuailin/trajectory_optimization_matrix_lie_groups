@@ -123,7 +123,6 @@ class BaseDynamics():
         raise NotImplementedError
     
 
-
 class AutoDiffDynamics(BaseDynamics):
 
     """Auto-differentiated Dynamics Model implemented with Jax."""
@@ -266,25 +265,24 @@ class AutoDiffDynamics(BaseDynamics):
         return self._f_uu(x,u,i)
     
 
-class SE3Dynamics(BaseDynamics):
+class ErrorStateSE3Dynamics(BaseDynamics):
 
-    """Error-State SE(3) Dynamics Model implemented with Jax."""
+    """Error-State SE(3) Dynamics Model, with Only First-order Derivative"""
 
-    def __init__(self, f, state_size=13, action_size=6, hessians=False, **kwargs):
+    def __init__(self, J, X_ref, xi_ref, dt, integration_method="euler",
+                    state_size=(6,6), action_size=6, hessians=False, **kwargs):
         """Constructs an Dynamics model for SE(3).
 
         Args:
-            f: Discretized dynamics function for velocity (e.g. after RK4):
-                Args:
-                    x: Batch of state variables, stacked by
-                        Lie algebra, perturbed Lie algebra  
-                    u: Batch of action variables, the generalized control 
-                        inputs in cotangent space of Lie algebra
-                    i: Batch of time step variables.
-                Returns:
-                    f: Batch of next state variables, stacked by
-                        Lie algebra, perturbed Lie algebra  
-            state_size: State variable dimension.
+            J: Inertia matrix, diag(I_b, m * I_3), 
+                m : body mass,
+                I_b : moment of inertia in the body frame.
+            X_ref: List of Lie Group reference, (N, error_state_size, 1)
+            xi_ref: List of velocity reference, described in Lie Algebra,
+                 (N, velocity_size, 1)
+            dt: Sampling time
+            state_size: Tuple of State variable dimension, 
+                ( error state size, velocity state size ).
             action_size: Input variable dimension.
             hessians: Evaluate the dynamic model's second order derivatives.
                 Default: only use first order derivatives. (i.e. iLQR instead
@@ -293,21 +291,59 @@ class SE3Dynamics(BaseDynamics):
                 function, e.g. in the preivious version `theano.function()`.
         """
 
-        self._state_size = state_size
+        self._state_size = state_size[0] + state_size[1]
+        self._error_state_size = state_size[0] 
+        self._vel_state_size = state_size[1] 
         self._action_size = action_size
 
-        self._has_hessians = hessians
-        # if hessians:
-        #     self._f_xx = jit(hessian(f, argnums=0))
-        #     self._f_ux = jit(jacfwd( jacfwd(f, argnums=1) ))
-        #     self._f_uu = jit(hessian(f, argnums=1))
+        self._X_ref = X_ref
+        self._xi_ref = xi_ref
+        self._x_ref = np.concatenate(( X_ref, xi_ref ), axis = 1)
 
-        super(SE3Dynamics, self).__init__()
+        self._Ib = J[0:3, 0:3] 
+        self._m = J[4,4]
+        self._J = J
+        self._Jinv = np.linalg.inv(J)
+        
+        if X_ref.shape[0] != xi_ref.shape[0]:
+            raise ValueError("Group reference X and velocity reference should share the same time horizon")
+        self._horizon = X_ref.shape[0]
+        self._dt = dt
+
+        self.integration_method = integration_method
+        if integration_method == "euler":
+            self.f = self.fd_euler
+        elif integration_method == "rk4":
+            self.f = self.fd_rk4
+        else:
+            raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
+        
+        self._f = jit(f)
+        self._f_x = jit(jacfwd(f))
+        self._f_u = jit(jacfwd(f, argnums=1))
+
+        self._has_hessians = hessians
+        if hessians:
+            self._f_xx = jit(hessian(f, argnums=0))
+            self._f_ux = jit(jacfwd( jacfwd(f, argnums=1) ))
+            self._f_uu = jit(hessian(f, argnums=1))
+
+        super(ErrorStateSE3Dynamics, self).__init__()
 
     @property
     def state_size(self):
         """State size."""
         return self._state_size
+
+    @property
+    def error_state_size(self):
+        """Error-state size."""
+        return self._error_state_size
+
+    @property
+    def vel_state_size(self):
+        """Velocity state size."""
+        return self._vel_state_size
 
     @property
     def action_size(self):
@@ -318,10 +354,52 @@ class SE3Dynamics(BaseDynamics):
     def has_hessians(self):
         """Whether the second order derivatives are available."""
         return self._has_hessians
+
+    @property
+    def Ib(self):
+        """Moment of inertia in the body frame."""
+        return self._Ib
+
+    @property
+    def m(self):
+        """Mass of the system."""
+        return self._Ib
+
+    @property
+    def J(self):
+        """Inertia matrix of the system."""
+        return self._J
+    
+    @property
+    def Jinv(self):
+        """Inverse of the inertia matrix."""
+        return self._Jinv
+
+    @property
+    def horizon(self):
+        """The horizon for dynamics to be valid, due to horizon of given reference."""
+        return self._horizon
+    
+    @property
+    def dt(self):
+        """Sampling time of the system dynamics."""
+        return self._dt
+
+    def xi_ref(self, i) :
+        """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
+        return self._xi_ref(i)
+
+    def X_ref(self, i) :
+        """Return the Lie group reference X_ref at time index i."""
+        return self._X_ref(i)
+
+    def x_ref(self, i) :
+        """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
+        return self._x_ref(i)
     
     def skew( self, w ):
         """Get the isomorphic element in the Lie algebra for SO3, 
-            i.e. the skew symmetric matrix"""
+            i.e. the skew symmetric matrix."""
         if isinstance(w, np.ndarray) or isinstance(w, jnp.ndarray) and w.shape == (3,) or w.shape == (3, 1):
             return np.array([
                 [0, -w[2], w[1]],
@@ -332,7 +410,7 @@ class SE3Dynamics(BaseDynamics):
             raise ValueError("Input must be a 3d vector")
 
     def adjoint( self, xi ):
-        """ Get the the adjoint matrix representation of Lie Algebra"""
+        """ Get the the adjoint matrix representation of Lie Algebra."""
         w = np.array([xi[0], xi[1], xi[2]])
         v = np.array([xi[3], xi[4], xi[5]])
         adx = np.block([
@@ -341,16 +419,16 @@ class SE3Dynamics(BaseDynamics):
         ])
         return adx
     
-    def adjoint( self, xi ):
-        """ Get the the adjoint matrix representation of Lie Algebra"""
+    def coadjoint( self, xi ):
+        """ Get the the coadjoint matrix representation of Lie Algebra."""
         return self.adjoint(xi).T
 
-    def f(self, x, u, i):
-        """Dynamics model.
+    def fc(self, x, u, i):
+        """ Continuous linearized dynamicsf.
 
         Args:
             x: Current state [state_size], stacked by
-                Lie algebra, perturbed Lie algebra  
+                error-state and velocity, both on Lie Algebra
             u: Current control [action_size].
             i: Current time step.
 
@@ -358,9 +436,63 @@ class SE3Dynamics(BaseDynamics):
             Next state [state_size].
         """
 
-        
+        # psi = x[:self.error_state_size]
+        xi = x[-self.vel_state_size:]
+        omega = xi[:3]
+        v = xi[-3:]
 
-        return self._f(x,u,i)
+        G = np.block([
+            [self.skew( self.Ib @ omega ), self.m * self.skew( v )],
+            [self.m * self.skew( v ), np.zeros((3,3))],        
+        ])
+        Ht = - self.Jinv @ ( self.coadjoint( xi ) @ self.J + G )
+        bt = - self.Jinv @ G @ xi
+
+        At = np.stack([
+            [- self.adjoint( self.xi_ref(i) ), np.identity( self.error_state_size )],
+            [np.zeros((self.vel_state_size, self.error_state_size)), Ht]
+        ])
+        Bt = np.vstack((np.zeros((self.error_state_size, self.action_size)),
+                self.Jinv ))
+        ht = np.vstack( (-self.xi_ref(i), bt ))
+
+        xt_dot = At @ x + Bt @ u + ht
+        
+        return xt_dot
+    
+    def fd_euler( self, x, u, i ):
+        """ Descrtized dynamics with Eular method.
+
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        return x + self.fc( x,u,i ) * self.dt
+    
+    def fd_rk4( self, x, u, i ):
+        """ Descrtized dynamics with RK4 method.
+
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        s1 = self.fc( x, u, i)
+        s2 = self.fc( x+ self.dt/2*s1, u, i )
+        s3 = self.fc( x+ self.dt/2*s2, u, i )
+        s4 = self.fc( x+ self.dt*s3, u, i )
+        x_next = x + self.dt/6 * ( s1 + 2 * s2 + 2 * s3 + s4 )
+    
+        return x_next
 
     def f_x(self, x, u, i):
         """Partial derivative of dynamics model with respect to x.
@@ -436,11 +568,4 @@ class SE3Dynamics(BaseDynamics):
 
         return self._f_uu(x,u,i)
     
-
-class AutoDiffVelLieDynamics(BaseDynamics): 
     
-    """Lie Group Dynamics with Given Velocity Dynamics on Tangent Plane"""
-
-    def __init__(self, **kwargs):
-
-        super(AutoDiffVelLieDynamics, self).__init__()
