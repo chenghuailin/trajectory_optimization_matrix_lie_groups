@@ -3,7 +3,9 @@ import numpy as np
 from jax import random
 from traopt_dynamics import ErrorStateSE3AutoDiffDynamics, skew
 from scipy.linalg import expm
-from scipy.spatial.transform import Rotation as R
+# from scipy.spatial.transform import Rotation as R
+from pyquaternion import Quaternion
+import matplotlib.pyplot as plt
 
 
 seed = 24234156
@@ -23,7 +25,6 @@ J = np.block([
     [np.zeros((3, 3)), m * np.identity(3)]
 ])
 
-
 # ====================
 # Reference Generation
 # ====================
@@ -33,10 +34,15 @@ p0_ref = np.array([0, 0, 0])
 w0_ref = np.array([0, 0, 1]) * 1
 v0_ref = np.array([1, 0, 0.1]) * 2
 
+# x0_ref and X should be kept the same
 x0_ref = np.concatenate((q0_ref, p0_ref))
-xid_ref = np.concatenate((w0_ref, v0_ref))
+# X = np.eye(4) # SE(3)
+X = np.block([
+    [ Quaternion(q0_ref).rotation_matrix, p0_ref.reshape(-1,1) ],
+    [ np.zeros((1,3)),1 ],
+])
 
-X = np.eye(4)
+xid_ref = np.concatenate((w0_ref, v0_ref))
 
 X_ref = np.zeros((Nsim + 1, 7))  # 7 because of [quat(4) + position(3)]
 xi_ref = np.zeros((Nsim + 1, 6)) 
@@ -45,7 +51,7 @@ X_ref[0] = x0_ref
 xi_ref[0] = xid_ref
 
 for i in range(Nsim):
-    
+
     xid_ref_rt = xid_ref.copy()
 
     # You can try some time-varying twists here:
@@ -65,7 +71,8 @@ for i in range(Nsim):
     position = X[:3, 3]
 
     # Convert rotation matrix to quaternion
-    quat = R.from_matrix(rot_matrix).as_quat()
+    quaternion = Quaternion(matrix=rot_matrix)
+    quat = quaternion.elements
 
     # Store the reference trajectory (quaternion + position)
     X_ref[i + 1] = np.concatenate((quat, position))
@@ -73,4 +80,56 @@ for i in range(Nsim):
     # Store the reference twists
     xi_ref[i + 1] = xid_ref_rt
 
-ErrorStateSE3AutoDiffDynamics( J, X_ref, xi_ref, dt )
+se3 = ErrorStateSE3AutoDiffDynamics( J, X_ref, xi_ref, dt )
+
+
+# ===============================
+# Result Visualization
+# ===============================
+
+# Define an initial vector
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+
+# Initialize the plot
+fig1 = plt.figure(1)
+ax = fig1.add_subplot(111, projection='3d')
+
+# Plot the initial vector
+ax.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+
+# Loop through quaternion data to plot rotated vectors
+for i in range(0, Nsim + 1, int((Nsim + 1) / 50)):  # Plot every 50th quaternion for visualization
+    quat = Quaternion(X_ref[i, :4])  # Extract the quaternion from the X_ref data
+    rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    
+    # Choose either one of them
+    # 1. Assume position is [0, 0, 0] for simplicity in this example
+    # position = np.array([0, 0, 0])  
+
+    # 2. Extract the position 
+    position = X_ref[i, 4:]
+    rotated_vector = rotated_vector + position
+    
+    # Plot the rotated vector
+    ax.quiver(position[0], position[1], position[2],
+              rotated_vector[0], rotated_vector[1], rotated_vector[2],
+              color='b', length=1, label='Rotated Vector' if i == 0 else '')
+
+# Set the limits for the axes
+lim = 4
+ax.set_xlim([-lim, lim])  # Adjusted limits for better visualization
+ax.set_ylim([-lim, lim])
+ax.set_zlim([-lim, lim])
+# ax.autoscale()
+
+# Add a legend to the plot
+ax.legend()
+
+# Set axis labels
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+
+# Display the plot
+plt.show()
