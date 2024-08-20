@@ -12,7 +12,7 @@ def skew( w ):
             [-w_flat[1], w_flat[0], 0]
         ])
     else:
-        raise ValueError("Input must be a 3d vector")
+        raise ValueError("Input must be a 3d np or jnp vector")
 
 
 def unskew(omega_hat):
@@ -25,20 +25,25 @@ def unskew(omega_hat):
     Returns:
     numpy.ndarray: 3x1 vector corresponding to the skew-symmetric matrix
     """
-    return np.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]])
+
+    if isinstance(omega_hat, np.ndarray) or isinstance(omega_hat, jnp.ndarray) \
+        and omega_hat.shape == (3,3):
+        return np.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]])
+    else:
+        raise ValueError("Input must be a 3x3 np or jnp matrix")
+
     
 
-def se3hat( w ):
+def se3_hat( xi ):
     
-    """Given the isomorphic cartesian 6d vector, 
+    """Given the isomorphic cartesian 6d vector [omega, pos], 
         return the Lie algebra se(3) matrix. """
     
-    if isinstance(w, np.ndarray) or isinstance(w, jnp.ndarray) and w.shape == (6,) or w.shape == (6, 1):
-        w_flat = w.reshape(-1)
-        return np.array([
-            [0, -w_flat[2], w_flat[1]],
-            [w_flat[2], 0, -w_flat[0]],
-            [-w_flat[1], w_flat[0], 0]
+    if isinstance(xi, np.ndarray) or isinstance(xi, jnp.ndarray) and xi.shape == (6,) or xi.shape == (6, 1):
+        xi_flat = w.reshape(-1)
+        return np.block([
+        [skew(xi_flat[:3]), xi_flat[3:6].reshape(3, 1)],
+        [np.zeros((1, 3)), 0]
         ])
     else:
         raise ValueError("Input must be a 6d np or jnp array")

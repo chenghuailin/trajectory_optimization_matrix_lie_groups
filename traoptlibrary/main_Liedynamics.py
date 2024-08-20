@@ -2,12 +2,11 @@ from traopt_controller import iLQR
 import numpy as np
 from jax import random
 from traopt_dynamics import ErrorStateSE3AutoDiffDynamics
-from traopt_manifold import skew, unskew, se3hat
+from traopt_utilis import skew, unskew, se3_hat
 from scipy.linalg import expm
-# from scipy.spatial.transform import Rotation as R
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
-
+# from scipy.spatial.transform import Rotation as R
 
 seed = 24234156
 key = random.key(seed)
@@ -166,7 +165,7 @@ ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], col
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, int((Nsim + 1) / 50)):  # Plot every 50th quaternion for visualization
     
-    se3_matrix = expm(  )
+    se3_matrix = expm( se3hat(  ) )
     rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
