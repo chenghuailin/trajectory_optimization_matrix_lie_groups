@@ -40,10 +40,10 @@ def se3_hat( xi ):
         return the Lie algebra se(3) matrix. """
     
     if isinstance(xi, np.ndarray) or isinstance(xi, jnp.ndarray) and xi.shape == (6,) or xi.shape == (6, 1):
-        xi_flat = w.reshape(-1)
+        xi_flat = xi.reshape(-1)
         return np.block([
-        [skew(xi_flat[:3]), xi_flat[3:6].reshape(3, 1)],
-        [np.zeros((1, 3)), 0]
+            [skew(xi_flat[:3]), xi_flat[3:6].reshape(3, 1)],
+            [np.zeros((1, 3)), 0]
         ])
     else:
         raise ValueError("Input must be a 6d np or jnp array")
