@@ -265,19 +265,6 @@ class AutoDiffDynamics(BaseDynamics):
         return self._f_uu(x,u,i)
     
 
-def skew( w ):
-    """Get the isomorphic element in the Lie algebra for SO3, 
-        i.e. the skew symmetric matrix."""
-    if isinstance(w, np.ndarray) or isinstance(w, jnp.ndarray) and w.shape == (3,) or w.shape == (3, 1):
-        return np.array([
-            [0, -w[2], w[1]],
-            [w[2], 0, -w[0]],
-            [-w[1], w[0], 0]
-        ])
-    else:
-        raise ValueError("Input must be a 3d vector")
-
-
 class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
 
     """Error-State SE(3) Dynamics Model implemented with Jax for Derivatvies"""
@@ -400,15 +387,15 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
 
     def xi_ref(self, i) :
         """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
-        return self._xi_ref(i)
+        return self._xi_ref[i]
 
     def X_ref(self, i) :
         """Return the Lie group reference X_ref at time index i."""
-        return self._X_ref(i)
+        return self._X_ref[i]
 
     def x_ref(self, i) :
         """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
-        return self._x_ref(i)
+        return self._x_ref[i]
 
     def adjoint( self, xi ):
         """ Get the the adjoint matrix representation of Lie Algebra."""
@@ -442,6 +429,8 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         omega = xi[:3]
         v = xi[-3:]
 
+        # print("v is shape of \n", v.shape, "with value", v)
+
         G = np.block([
             [skew( self.Ib @ omega ), self.m * skew( v )],
             [self.m * skew( v ), np.zeros((3,3))],        
@@ -449,13 +438,21 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         Ht = - self.Jinv @ ( self.coadjoint( xi ) @ self.J + G )
         bt = - self.Jinv @ G @ xi
 
-        At = np.stack([
+        # print("\nG is shape of", G.shape, "with value \n", G)
+        # print("\nHt is shape of", Ht.shape, "with value \n", Ht)
+        # print("\nbt is shape of", bt.shape, "with value \n", bt)
+
+        At = np.block([
             [- self.adjoint( self.xi_ref(i) ), np.identity( self.error_state_size )],
             [np.zeros((self.vel_state_size, self.error_state_size)), Ht]
         ])
         Bt = np.vstack((np.zeros((self.error_state_size, self.action_size)),
                 self.Jinv ))
         ht = np.vstack( (-self.xi_ref(i), bt ))
+
+        # print("\nAt is shape of", At.shape, "with value \n", At)
+        # print("\nBt is shape of", Bt.shape, "with value \n", Bt)
+        # print("\nht is shape of", ht.shape, "with value \n", ht)
 
         xt_dot = At @ x + Bt @ u + ht
         

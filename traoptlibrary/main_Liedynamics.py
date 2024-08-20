@@ -1,7 +1,8 @@
 from traopt_controller import iLQR
 import numpy as np
 from jax import random
-from traopt_dynamics import ErrorStateSE3AutoDiffDynamics, skew
+from traopt_dynamics import ErrorStateSE3AutoDiffDynamics
+from traopt_manifold import skew, unskew, se3hat
 from scipy.linalg import expm
 # from scipy.spatial.transform import Rotation as R
 from pyquaternion import Quaternion
@@ -25,9 +26,9 @@ J = np.block([
     [np.zeros((3, 3)), m * np.identity(3)]
 ])
 
-# ====================
+# =====================================================
 # Reference Generation
-# ====================
+# =====================================================
 
 q0_ref = np.array([1, 0, 0, 0])
 p0_ref = np.array([0, 0, 0])
@@ -37,10 +38,11 @@ v0_ref = np.array([1, 0, 0.1]) * 2
 # x0_ref and X should be kept the same
 x0_ref = np.concatenate((q0_ref, p0_ref))
 # X = np.eye(4) # SE(3)
-X = np.block([
+X0 = np.block([
     [ Quaternion(q0_ref).rotation_matrix, p0_ref.reshape(-1,1) ],
     [ np.zeros((1,3)),1 ],
 ])
+X = X0.copy()
 
 xid_ref = np.concatenate((w0_ref, v0_ref))
 
@@ -80,22 +82,37 @@ for i in range(Nsim):
     # Store the reference twists
     xi_ref[i + 1] = xid_ref_rt
 
-se3 = ErrorStateSE3AutoDiffDynamics( J, X_ref, xi_ref, dt )
+
+# =====================================================
+# Dynamics Simulation & Validation
+# =====================================================
+
+dyn_se3 = ErrorStateSE3AutoDiffDynamics( J, X_ref, xi_ref, dt )
+
+Nsim = 30
+x0 = np.zeros((12,1))
+u = xid_ref.reshape(6,1)
+# print(u)
+x_sim_list = np.zeros((Nsim,12,1))
+
+x_sim_list[0] = x0
+for i in range(Nsim-1):
+    x_sim_list[i+1] = dyn_se3.f( x_sim_list[i], u, i )
 
 
-# ===============================
-# Result Visualization
-# ===============================
+# =====================================================
+# Reference Visualization
+# =====================================================
+
+# Initialize the plot
+fig1 = plt.figure(1)
+ax1 = fig1.add_subplot(111, projection='3d')
 
 # Define an initial vector
 initial_vector = np.array([1, 0, 0])  # Example initial vector
 
-# Initialize the plot
-fig1 = plt.figure(1)
-ax = fig1.add_subplot(111, projection='3d')
-
 # Plot the initial vector
-ax.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
 
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, int((Nsim + 1) / 50)):  # Plot every 50th quaternion for visualization
@@ -118,18 +135,73 @@ for i in range(0, Nsim + 1, int((Nsim + 1) / 50)):  # Plot every 50th quaternion
 
 # Set the limits for the axes
 lim = 4
-ax.set_xlim([-lim, lim])  # Adjusted limits for better visualization
-ax.set_ylim([-lim, lim])
-ax.set_zlim([-lim, lim])
+ax1.set_xlim([-lim, lim])  # Adjusted limits for better visualization
+ax1.set_ylim([-lim, lim])
+ax1.set_zlim([-lim, lim])
 # ax.autoscale()
 
 # Add a legend to the plot
-ax.legend()
+ax1.legend()
 
 # Set axis labels
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_zlabel('Z')
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('Z')
+
+
+# =====================================================
+# Simulation Visualization
+# =====================================================
+
+# Initialize the plot
+fig2 = plt.figure(2)
+ax2 = fig2.add_subplot(111, projection='3d')
+
+# Define an initial vector
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+
+# Plot the initial vector
+ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+
+# Loop through quaternion data to plot rotated vectors
+for i in range(0, Nsim + 1, int((Nsim + 1) / 50)):  # Plot every 50th quaternion for visualization
+    
+    se3_matrix = expm(  )
+    rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    
+    # Choose either one of them
+    # 1. Assume position is [0, 0, 0] for simplicity in this example
+    # position = np.array([0, 0, 0])  
+
+    # 2. Extract the position 
+    position = X_ref[i, 4:]
+    rotated_vector = rotated_vector + position
+    
+    # Plot the rotated vector
+    ax2.quiver(position[0], position[1], position[2],
+              rotated_vector[0], rotated_vector[1], rotated_vector[2],
+              color='b', length=1, label='Rotated Vector' if i == 0 else '')
+
+# Set the limits for the axes
+lim = 4
+ax1.set_xlim([-lim, lim])  # Adjusted limits for better visualization
+ax1.set_ylim([-lim, lim])
+ax1.set_zlim([-lim, lim])
+# ax.autoscale()
+
+# Add a legend to the plot
+ax1.legend()
+
+# Set axis labels
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('Z')
+
+
+# =====================================================
+# Plotting
+# =====================================================
 
 # Display the plot
 plt.show()
