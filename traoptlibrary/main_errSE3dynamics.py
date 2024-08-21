@@ -90,7 +90,8 @@ dyn_se3 = ErrorStateSE3AutoDiffDynamics( J, X_ref, xi_ref, dt )
 
 # Nsim = 600
 x0 = np.zeros((12,1))
-u = xid_ref.reshape(6,1)
+u = dyn_se3.Jinv() @ xid_ref.reshape(6,1)
+# u = xid_ref.reshape(6,1)
 # u = np.zeros((6,1))
 # print(u)
 x_sim_list = np.zeros((Nsim+1,12,1))
@@ -100,7 +101,7 @@ for i in range(Nsim):
     x_sim_list[i+1] = dyn_se3.f( x_sim_list[i], u, i )
 
 # =====================================================
-# Visualization
+# Visualization with Vector
 # =====================================================
 
 interval_plot = int((Nsim + 1) / 40)
