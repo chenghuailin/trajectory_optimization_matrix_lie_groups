@@ -311,23 +311,25 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         self._horizon = X_ref.shape[0]
         self._dt = dt
 
+        # TODO: Use jit for faster computation
         self.integration_method = integration_method
         if integration_method == "euler":
-            self.f = self.fd_euler
+            # self._f = jit(self.fd_euler)
+            self._f = self.fd_euler
         elif integration_method == "rk4":
-            self.f = self.fd_rk4
+            # self._f = jit(self.fd_rk4)
+            self._f = self.fd_rk4
         else:
             raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
         
-        self._f = jit(self.f)
-        self._f_x = jit(jacfwd(self.f))
-        self._f_u = jit(jacfwd(self.f, argnums=1))
+        self._f_x = jit(jacfwd(self._f))
+        self._f_u = jit(jacfwd(self._f, argnums=1))
 
         self._has_hessians = hessians
         if hessians:
-            self._f_xx = jit(hessian(self.f, argnums=0))
-            self._f_ux = jit(jacfwd( jacfwd(self.f, argnums=1) ))
-            self._f_uu = jit(hessian(self.f, argnums=1))
+            self._f_xx = jit(hessian(self._f, argnums=0))
+            self._f_ux = jit(jacfwd( jacfwd(self._f, argnums=1) ))
+            self._f_uu = jit(hessian(self._f, argnums=1))
 
         self._debug = debug
 
@@ -498,6 +500,19 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
     
         return x_next
 
+    def f(self, x, u, i):
+        """Dynamics model.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        return self._f(x,u,i)
+    
     def f_x(self, x, u, i):
         """Partial derivative of dynamics model with respect to x.
 
