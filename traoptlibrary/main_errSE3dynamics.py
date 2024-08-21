@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 seed = 24234156
 key = random.key(seed)
 
-dt = 0.001
-Nsim = 200   # Simulation horizon
+dt = 0.01
+Nsim = 400   # Simulation horizon
 
 # ====================
 # Inertia Matrix
@@ -86,13 +86,16 @@ for i in range(Nsim):
 # Dynamics Simulation & Validation
 # =====================================================
 
-dyn_se3 = ErrorStateSE3AutoDiffDynamics( J, X_ref, xi_ref, dt )
+debug = {"vel_zero": True}
+
+dyn_se3 = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, debug=debug)
 
 # Nsim = 600
 x0 = np.zeros((12,1))
-u = dyn_se3.Jinv() @ xid_ref.reshape(6,1)
+x0[6:,0] = xid_ref
+# u = dyn_se3.Jinv() @ xid_ref.reshape(6,1)
 # u = xid_ref.reshape(6,1)
-# u = np.zeros((6,1))
+u = np.zeros((6,1))
 # print(u)
 x_sim_list = np.zeros((Nsim+1,12,1))
 
@@ -109,19 +112,19 @@ lim = 5
 
 # Initialize the plot
 fig1 = plt.figure(1)
-ax1 = fig1.add_subplot(131, projection='3d')
+ax1 = fig1.add_subplot(121, projection='3d')
 
 # fig2 = plt.figure(2)
-ax2 = fig1.add_subplot(132, projection='3d')
+# ax2 = fig1.add_subplot(132, projection='3d')
 
 # fig3 = plt.figure(3)
-ax3 = fig1.add_subplot(133, projection='3d')
+ax2 = fig1.add_subplot(122, projection='3d')
 
 # Define an initial vector and plot on figure
 initial_vector = np.array([1, 0, 0])  # Example initial vector
 ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+# ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
 ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
-ax3.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
 
 # Loop through quaternion data to plot rotated vectors
 # for i in range(0, Nsim + 1, int((Nsim + 1) / 20)):  # Plot every 50th quaternion for visualization
@@ -129,12 +132,12 @@ for i in range(0, Nsim + 1, interval_plot):
 
     # =========== 1. Plot the reference trajectory ===========
 
-    quat = Quaternion(X_ref[i, :4])  # Extract the quaternion from the X_ref data
+    quat = Quaternion(X_ref[i, :4, 0])  # Extract the quaternion from the X_ref data
     rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
     # Extract the position 
-    position = X_ref[i, 4:]
+    position = X_ref[i, 4:, 0]
     rotated_vector = rotated_vector + position
 
     # Plot the rotated vector
@@ -144,17 +147,17 @@ for i in range(0, Nsim + 1, interval_plot):
 
     # =========== 2. Plot the simulated velocity ===========
     
-    se3_matrix = expm( se3_hat( x_sim_list[i, 6:, :] ))
-    rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
-    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    # se3_matrix = expm( se3_hat( x_sim_list[i, 6:, :] ))
+    # rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
+    # rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
 
-    position = se3_matrix[:3, 3]
-    rotated_vector = rotated_vector + position
+    # position = se3_matrix[:3, 3]
+    # rotated_vector = rotated_vector + position
     
-    # Plot the rotated vector
-    ax2.quiver(position[0], position[1], position[2],
-              rotated_vector[0], rotated_vector[1], rotated_vector[2],
-              color='b', length=1, label='Rotated Vector' if i == 0 else '')
+    # # Plot the rotated vector
+    # ax2.quiver(position[0], position[1], position[2],
+    #           rotated_vector[0], rotated_vector[1], rotated_vector[2],
+    #           color='b', length=1, label='Rotated Vector' if i == 0 else '')
     
     # =========== 3. Plot the simulated error-state configuration trajectory ===========
 
@@ -170,7 +173,7 @@ for i in range(0, Nsim + 1, interval_plot):
     rotated_vector = rotated_vector + position
     
     # Plot the rotated vector
-    ax3.quiver(position[0], position[1], position[2],
+    ax2.quiver(position[0], position[1], position[2],
               rotated_vector[0], rotated_vector[1], rotated_vector[2],
               color='b', length=1, label='Rotated Vector' if i == 0 else '')
 
@@ -194,13 +197,13 @@ ax2.set_xlabel('X')
 ax2.set_ylabel('Y')
 ax2.set_zlabel('Z')
 
-ax3.set_xlim([-lim, lim])  
-ax3.set_ylim([-lim, lim])
-ax3.set_zlim([-lim, lim])
-ax3.legend()
-ax3.set_xlabel('X')
-ax3.set_ylabel('Y')
-ax3.set_zlabel('Z')
+# ax3.set_xlim([-lim, lim])  
+# ax3.set_ylim([-lim, lim])
+# ax3.set_zlim([-lim, lim])
+# ax3.legend()
+# ax3.set_xlabel('X')
+# ax3.set_ylabel('Y')
+# ax3.set_zlabel('Z')
 
 
 # =====================================================

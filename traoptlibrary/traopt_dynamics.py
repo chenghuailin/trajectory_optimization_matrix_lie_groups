@@ -270,7 +270,8 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
     """Error-State SE(3) Dynamics Model implemented with Jax for Derivatvies"""
 
     def __init__(self, J, X_ref, xi_ref, dt, integration_method="euler",
-                    state_size=(6,6), action_size=6, hessians=False, **kwargs):
+                    state_size=(6,6), action_size=6, 
+                    hessians=False, debug = None, **kwargs):
         """Constructs an Dynamics model for SE(3).
 
         Args:
@@ -327,6 +328,8 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
             self._f_xx = jit(hessian(self.f, argnums=0))
             self._f_ux = jit(jacfwd( jacfwd(self.f, argnums=1) ))
             self._f_uu = jit(hessian(self.f, argnums=1))
+
+        self._debug = debug
 
         super(ErrorStateSE3AutoDiffDynamics, self).__init__()
 
@@ -455,6 +458,9 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         # print("\nht is shape of", ht.shape, "with value \n", ht)
 
         xt_dot = At @ x + Bt @ u + ht
+
+        if self._debug and self._debug.get('vel_zero'):
+            xt_dot[-self.vel_state_size:] = 0
         
         return xt_dot
     
