@@ -5,7 +5,7 @@ from jax import random
 from traopt_dynamics import ErrorStateSE3AutoDiffDynamics
 from traopt_cost import ErrorStateSE3LieAlgebraAutoDiffQuadraticCost
 from traopt_utilis import skew, unskew, se3_hat
-from jax.scipy.linalg import expm
+from scipy.linalg import expm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 
@@ -122,7 +122,6 @@ for i in range(Nsim):
     xi_ref[i + 1] = xid_ref_rt.reshape(6,1)
     # xi_ref = xi_ref.at[i + 1].set(jnp.concatenate((quat, position)).reshape(7,1))
 
-
 X_ref = jnp.array(X_ref)
 xi_ref = jnp.array(xi_ref)
 
@@ -137,14 +136,14 @@ dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, debug=debug)
 # Cost Instantiation
 # =====================================================
 
-Q = jnp.diag([
+Q = jnp.diag(jnp.array([ 
     10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.
-])
-P = jnp.diag([
+    1., 1., 1., 1., 1., 1. 
+]))
+P = jnp.diag(jnp.array([ 
     10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.
-]) * 10
+    1., 1., 1., 1., 1., 1.  
+])) * 10
 R = jnp.identity(6) * 1e-5
 
 cost = ErrorStateSE3LieAlgebraAutoDiffQuadraticCost( Q, R, P, xi_ref )
