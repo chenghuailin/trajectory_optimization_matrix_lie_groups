@@ -4,9 +4,9 @@ import jax.numpy as jnp
 def skew( w ):
     """Get the isomorphic element in the Lie algebra for SO3, 
         i.e. the skew symmetric matrix."""
-    if isinstance(w, np.ndarray) or isinstance(w, jnp.ndarray) and w.shape == (3,) or w.shape == (3, 1):
+    if isinstance(w, (jnp.ndarray, np.ndarray)) and w.shape == (3,) or w.shape == (3, 1):
         w_flat = w.reshape(-1)
-        return np.array([
+        return jnp.array([
             [0, -w_flat[2], w_flat[1]],
             [w_flat[2], 0, -w_flat[0]],
             [-w_flat[1], w_flat[0], 0]
@@ -26,9 +26,9 @@ def unskew(omega_hat):
     numpy.ndarray: 3x1 vector corresponding to the skew-symmetric matrix
     """
 
-    if isinstance(omega_hat, np.ndarray) or isinstance(omega_hat, jnp.ndarray) \
+    if isinstance(omega_hat, (jnp.ndarray, np.ndarray)) \
         and omega_hat.shape == (3,3):
-        return np.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]])
+        return jnp.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]])
     else:
         raise ValueError("Input must be a 3x3 np or jnp matrix")
 
@@ -39,21 +39,21 @@ def se3_hat( xi ):
     """Given the isomorphic cartesian 6d vector [omega, pos], 
         return the Lie algebra se(3) matrix. """
     
-    if isinstance(xi, np.ndarray) or isinstance(xi, jnp.ndarray) and xi.shape == (6,) or xi.shape == (6, 1):
+    if isinstance(xi, (jnp.ndarray, np.ndarray)) and xi.shape == (6,) or xi.shape == (6, 1):
         xi_flat = xi.reshape(-1)
-        return np.block([
+        return jnp.block([
             [skew(xi_flat[:3]), xi_flat[3:6].reshape(3, 1)],
-            [np.zeros((1, 3)), 0]
+            [jnp.zeros((1, 3)), 0]
         ])
     else:
         raise ValueError("Input must be a 6d np or jnp array")
     
 def adjoint( xi ):
     """ Get the the adjoint matrix representation of Lie Algebra."""
-    w = np.array([xi[0], xi[1], xi[2]])
-    v = np.array([xi[3], xi[4], xi[5]])
-    adx = np.block([
-        [skew(w), np.zeros((3, 3))],
+    w = jnp.array([xi[0], xi[1], xi[2]])
+    v = jnp.array([xi[3], xi[4], xi[5]])
+    adx = jnp.block([
+        [skew(w), jnp.zeros((3, 3))],
         [skew(v), skew(w)]
     ])
     return adx
