@@ -512,7 +512,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         Returns:
             df/dx [state_size, state_size].
         """
-        return self._f_x(x,u,i)
+        return self._f_x(x,u,i).reshape(self.state_size,self.state_size)
 
     def f_u(self, x, u, i):
         """Partial derivative of dynamics model with respect to u.
@@ -525,7 +525,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         Returns:
             df/du [state_size, action_size].
         """
-        return self._f_u(x,u,i)
+        return self._f_u(x,u,i).reshape(self.state_size,self.action_size)
 
     def f_xx(self, x, u, i):
         """Second partial derivative of dynamics model with respect to x.
