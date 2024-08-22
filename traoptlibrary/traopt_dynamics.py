@@ -299,12 +299,12 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
 
         self._X_ref = X_ref
         self._xi_ref = xi_ref
-        self._x_ref = np.concatenate(( X_ref, xi_ref ), axis = 1)
+        self._x_ref = jnp.concatenate(( X_ref, xi_ref ), axis = 1)
 
         self._Ib = J[0:3, 0:3] 
         self._m = J[4,4]
         self._J = J
-        self._Jinv = np.linalg.inv(J)
+        self._Jinv = jnp.linalg.inv(J)
         
         if X_ref.shape[0] != xi_ref.shape[0]:
             raise ValueError("Group reference X and velocity reference should share the same time horizon")
@@ -368,7 +368,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
     @property
     def m(self):
         """Mass of the system."""
-        return self._Ib
+        return self._m
 
     @property
     def J(self):
@@ -416,15 +416,17 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         """
 
         # psi = x[:self.error_state_size]
+        # x = x.reshape(self.state_size, 1)
+
         xi = x[-self.vel_state_size:]
         omega = xi[:3]
         v = xi[-3:]
 
         # print("v is shape of \n", v.shape, "with value", v)
 
-        G = np.block([
+        G = jnp.block([
             [skew( self.Ib @ omega ), self.m * skew( v )],
-            [self.m * skew( v ), np.zeros((3,3))],        
+            [self.m * skew( v ), jnp.zeros((3,3))],        
         ])
         Ht = - self.Jinv @ ( coadjoint( xi ) @ self.J + G )
         bt = - self.Jinv @ G @ xi
@@ -433,13 +435,13 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         # print("\nHt is shape of", Ht.shape, "with value \n", Ht)
         # print("\nbt is shape of", bt.shape, "with value \n", bt)
 
-        At = np.block([
-            [- adjoint( self.xi_ref(i) ), np.identity( self.error_state_size )],
-            [np.zeros((self.vel_state_size, self.error_state_size)), Ht]
+        At = jnp.block([
+            [- adjoint( self.xi_ref(i) ), jnp.identity( self.error_state_size )],
+            [jnp.zeros((self.vel_state_size, self.error_state_size)), Ht]
         ])
-        Bt = np.vstack((np.zeros((self.error_state_size, self.action_size)),
+        Bt = jnp.vstack((jnp.zeros((self.error_state_size, self.action_size)),
                 self.Jinv ))
-        ht = np.vstack( (-self.xi_ref(i), bt ))
+        ht = jnp.vstack( (-self.xi_ref(i), bt ))
 
         # print("\nAt is shape of", At.shape, "with value \n", At)
         # print("\nBt is shape of", Bt.shape, "with value \n", Bt)
@@ -448,7 +450,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         xt_dot = At @ x + Bt @ u + ht
 
         if self._debug and self._debug.get('vel_zero'):
-            xt_dot[-self.vel_state_size:] = 0
+            xt_dot = xt_dot.at[-self.vel_state_size:].set(0)
         
         return xt_dot
     
