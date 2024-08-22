@@ -2,7 +2,7 @@ import abc
 import numpy as np
 import jax.numpy as jnp
 from jax import jacfwd, hessian, jit
-from traopt_utilis import skew, unskew, se3_hat
+from traopt_utilis import skew, unskew, se3_hat, adjoint, coadjoint
 
 class BaseDynamics():
 
@@ -402,20 +402,6 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
         return self._x_ref[i]
 
-    def adjoint( self, xi ):
-        """ Get the the adjoint matrix representation of Lie Algebra."""
-        w = np.array([xi[0], xi[1], xi[2]])
-        v = np.array([xi[3], xi[4], xi[5]])
-        adx = np.block([
-            [skew(w), np.zeros((3, 3))],
-            [skew(v), skew(w)]
-        ])
-        return adx
-    
-    def coadjoint( self, xi ):
-        """ Get the the coadjoint matrix representation of Lie Algebra."""
-        return self.adjoint(xi).T
-
     def fc(self, x, u, i):
         """ Continuous linearized dynamicsf.
 
@@ -440,7 +426,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
             [skew( self.Ib @ omega ), self.m * skew( v )],
             [self.m * skew( v ), np.zeros((3,3))],        
         ])
-        Ht = - self.Jinv @ ( self.coadjoint( xi ) @ self.J + G )
+        Ht = - self.Jinv @ ( coadjoint( xi ) @ self.J + G )
         bt = - self.Jinv @ G @ xi
 
         # print("\nG is shape of", G.shape, "with value \n", G)
@@ -448,7 +434,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         # print("\nbt is shape of", bt.shape, "with value \n", bt)
 
         At = np.block([
-            [- self.adjoint( self.xi_ref(i) ), np.identity( self.error_state_size )],
+            [- adjoint( self.xi_ref(i) ), np.identity( self.error_state_size )],
             [np.zeros((self.vel_state_size, self.error_state_size)), Ht]
         ])
         Bt = np.vstack((np.zeros((self.error_state_size, self.action_size)),

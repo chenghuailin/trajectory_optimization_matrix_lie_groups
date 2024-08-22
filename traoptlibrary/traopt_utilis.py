@@ -47,3 +47,17 @@ def se3_hat( xi ):
         ])
     else:
         raise ValueError("Input must be a 6d np or jnp array")
+    
+def adjoint( xi ):
+    """ Get the the adjoint matrix representation of Lie Algebra."""
+    w = np.array([xi[0], xi[1], xi[2]])
+    v = np.array([xi[3], xi[4], xi[5]])
+    adx = np.block([
+        [skew(w), np.zeros((3, 3))],
+        [skew(v), skew(w)]
+    ])
+    return adx
+    
+def coadjoint( xi ):
+    """ Get the the coadjoint matrix representation of Lie Algebra."""
+    return adjoint(xi).T
