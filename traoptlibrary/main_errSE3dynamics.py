@@ -1,5 +1,6 @@
 from traopt_controller import iLQR
 import numpy as np
+import jax.numpy as jnp
 from jax import random
 from traopt_dynamics import ErrorStateSE3AutoDiffDynamics
 from traopt_utilis import skew, unskew, se3_hat
@@ -82,6 +83,9 @@ for i in range(Nsim):
     xi_ref[i + 1] = xid_ref_rt.reshape(6,1)
 
 
+X_ref = jnp.array(X_ref)
+xi_ref = jnp.array(xi_ref)
+
 # =====================================================
 # Dynamics Simulation & Validation
 # =====================================================
@@ -90,14 +94,16 @@ debug = {"vel_zero": True}
 
 dyn_se3 = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, debug=debug)
 
-# Nsim = 600
-x0 = np.zeros((12,1))
-x0[6:,0] = xid_ref
-# u = dyn_se3.Jinv() @ xid_ref.reshape(6,1)
-# u = xid_ref.reshape(6,1)
-u = np.zeros((6,1))
-# print(u)
-x_sim_list = np.zeros((Nsim+1,12,1))
+# x0 = np.zeros((12,1))
+# x0[6:,0] = xid_ref
+# u = np.zeros((6,1))
+# x_sim_list = np.zeros(( Nsim+1,12,1 ))
+
+x0 = np.zeros((12,))
+x0[6:] = xid_ref.reshape(6,)
+u = np.zeros((6,))
+# u = np.array([ 0, 0, 0, 0, 1, 0 ])
+x_sim_list = np.zeros(( Nsim+1, 12 ))
 
 x_sim_list[0] = x0
 for i in range(Nsim):
@@ -162,9 +168,9 @@ for i in range(0, Nsim + 1, interval_plot):
     # =========== 3. Plot the simulated error-state configuration trajectory ===========
 
     se3_matrix = np.block([
-        [Quaternion(X_ref[i, :4]).rotation_matrix, X_ref[i, 4:].reshape(3, 1)],
+        [Quaternion(np.array(X_ref[i, :4])).rotation_matrix, X_ref[i, 4:].reshape(3, 1)],
         [ np.zeros((1,3)), 1 ],
-    ]) @ expm( se3_hat(x_sim_list[i, :6, :]) )
+    ]) @ expm( se3_hat(x_sim_list[i, :6]) )
     
     rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
