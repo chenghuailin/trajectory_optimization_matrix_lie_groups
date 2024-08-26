@@ -9,6 +9,14 @@ from scipy.linalg import expm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 
+def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, alpha, mu, J_hist, xs_hist, us_hist):
+    J_hist.append(J_opt)
+    xs_hist.append(xs.copy())
+    us_hist.append(us.copy())
+    info = "converged" if converged else ("accepted" if accepted else "failed")
+    # final_state = xs[-1]
+    # print("iteration", iteration_count, info, J_opt, "\n", final_state, "\n", alpha, mu)
+    print("iteration", iteration_count, info, J_opt, alpha, mu)
 
 seed = 24234156
 key = random.key(seed)
@@ -61,7 +69,6 @@ J = np.block([
 
 # X_ref = X_ref.at[0].set(x0_ref.reshape(7, 1))
 # xi_ref = xi_ref.at[0].set(xid_ref.reshape(6, 1))
-
 
 q0_ref = np.array([1, 0, 0, 0])
 p0_ref = np.array([0, 0, 0])
@@ -136,15 +143,15 @@ dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, debug=debug)
 # Cost Instantiation
 # =====================================================
 
-Q = jnp.diag(jnp.array([ 
+Q = np.diag([ 
     10., 10., 10., 1., 1., 1.,
     1., 1., 1., 1., 1., 1. 
-]))
-P = jnp.diag(jnp.array([ 
+])
+P = np.diag([
     10., 10., 10., 1., 1., 1.,
     1., 1., 1., 1., 1., 1.  
-])) * 10
-R = jnp.identity(6) * 1e-5
+]) * 10
+R = np.identity(6) * 1e-5
 
 cost = ErrorStateSE3LieAlgebraAutoDiffQuadraticCost( Q, R, P, xi_ref )
 
@@ -157,14 +164,13 @@ HESSIANS = False
 action_size = 6
 state_size = 12
 
-x0 = jnp.zeros((state_size,1))
+x0 = jnp.zeros((state_size,))
+us_init = np.zeros((N, action_size,))
 
 ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
 
-us_init = np.zeros((N, action_size, 1))
-
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
-        ilqr.fit(x0, us_init, n_iterations=200)
+        ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
 
 # =====================================================
