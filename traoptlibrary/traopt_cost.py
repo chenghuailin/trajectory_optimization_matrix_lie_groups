@@ -2,6 +2,7 @@
 
 import abc
 import numpy as np
+import jax.numpy as jnp
 from jax import jacfwd, hessian, jit
 from traopt_utilis import adjoint
 
@@ -301,9 +302,9 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
         self._action_size = action_size
 
         self._xi_ref = xi_ref
-        self._Q = Q
-        self._R = R
-        self._P = P
+        self._Q = jnp.array(Q)
+        self._R = jnp.array(R)
+        self._P = jnp.array(P)
 
         self._l = jit(self._l)
 
@@ -374,16 +375,16 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
             Instantaneous cost (scalar).
         """
         
-        Ct = np.block([
-            [ np.identity( self.error_state_size ), np.zeros((self.vel_state_size,self.vel_state_size)) ],
-            [ -adjoint( self.xi_ref(i) ), np.identity( self.vel_state_size ) ],
+        Ct = jnp.block([
+            [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
+            [ -adjoint( self.xi_ref(i) ), jnp.identity( self.vel_state_size ) ],
         ])
-        dt = np.vstack(
-            ( np.zeros((self.error_state_size,1)), self.xi_ref(i) )
+        dt = jnp.vstack(
+            ( jnp.zeros((self.error_state_size,1)), self.xi_ref(i) )
         )
         yt = Ct @ x - dt
         
-        return yt.T @ self.Q @ yt + u.T @ self.R @ u
+        return (yt.T @ self.Q @ yt + u.T @ self.R @ u).reshape(-1)[0]
     
     def _l_terminal(self, x, i):
         """Terminal cost function.
@@ -396,16 +397,16 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
             Terminal cost (scalar).
         """
         
-        Ct = np.block([
-            [ np.identity( self.error_state_size ), np.zeros((self.vel_state_size,self.vel_state_size)) ],
-            [ -adjoint( self.xi_ref(i) ), np.identity( self.vel_state_size ) ],
+        Ct = jnp.block([
+            [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
+            [ -adjoint( self.xi_ref(i) ), jnp.identity( self.vel_state_size ) ],
         ])
-        dt = np.vstack(
-            ( np.zeros((self.error_state_size,1)), self.xi_ref(i) )
+        dt = jnp.vstack(
+            ( jnp.zeros((self.error_state_size,1)), self.xi_ref(i) )
         )
         yt = Ct @ x - dt
         
-        return yt.T @ self.P @ yt
+        return (yt.T @ self.P @ yt).reshape(-1)[0]
 
     
     def l(self, x, u, i, terminal=False):
@@ -438,9 +439,9 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
             dl/dx [state_size].
         """
         if terminal:
-            return self._l_x_terminal(x,i)
+            return self._l_x_terminal(x,i).reshape(self.state_size,)
 
-        return self._l_x(x,u,i)
+        return self._l_x(x,u,i).reshape(self.state_size,)
 
     def l_u(self, x, u, i, terminal=False):
         """Partial derivative of cost function with respect to u.
@@ -458,7 +459,7 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
             # Not a function of u, so the derivative is zero.
             return np.zeros(self._action_size)
 
-        return self._l_u(x,u,i)
+        return self._l_u(x,u,i).reshape(self.action_size,)
 
     def l_xx(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to x.
@@ -473,9 +474,9 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
             d^2l/dx^2 [state_size, state_size].
         """
         if terminal:
-            return self._l_xx_terminal(x,i)
+            return self._l_xx_terminal(x,i).reshape(self.state_size,self.state_size)
 
-        return self._l_xx(x,u,i)
+        return self._l_xx(x,u,i).reshape(self.state_size,self.state_size)
 
     def l_ux(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to u and x.
@@ -493,7 +494,7 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
             # Not a function of u, so the derivative is zero.
             return np.zeros((self._action_size, self._state_size))
 
-        return self._l_ux(x,u,i)
+        return self._l_ux(x,u,i).reshape(self.action_size,self.state_size)
 
     def l_uu(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to u.
@@ -511,4 +512,4 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
             # Not a function of u, so the derivative is zero.
             return np.zeros((self._action_size, self._action_size))
 
-        return self._l_uu(x,u,i)
+        return self._l_uu(x,u,i).reshape(self.action_size,self.action_size)
