@@ -430,7 +430,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
             [skew( self.Ib @ omega ), self.m * skew( v )],
             [self.m * skew( v ), jnp.zeros((3,3))],        
         ])
-        Ht = - self.Jinv @ ( coadjoint( xi ) @ self.J + G )
+        Ht = self.Jinv @ ( coadjoint( xi ) @ self.J + G )
         bt = - self.Jinv @ G @ xi
 
         # print("\nG is shape of", G.shape, "with value \n", G)

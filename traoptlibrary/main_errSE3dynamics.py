@@ -35,6 +35,9 @@ p0_ref = np.array([0, 0, 0])
 w0_ref = np.array([0, 0, 1]) * 1
 v0_ref = np.array([1, 0, 0.1]) * 2
 
+# w0_ref = np.array([0, 0, 0]) 
+# v0_ref = np.array([0, 1, 0]) 
+
 # x0_ref and X should be kept the same
 x0_ref = np.concatenate((q0_ref, p0_ref))
 # X = np.eye(4) # SE(3)
@@ -101,8 +104,8 @@ dyn_se3 = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, debug=debug)
 
 x0 = np.zeros((12,))
 x0[6:] = xid_ref.reshape(6,)
-u = np.zeros((6,))
-# u = np.array([ 0, 0, 0, 0, 1, 0 ])
+# u = np.zeros((6,))
+u = np.array([ 0, 0, 0, 0, 1, 0 ])
 x_sim_list = np.zeros(( Nsim+1, 12 ))
 
 x_sim_list[0] = x0
@@ -144,7 +147,6 @@ for i in range(0, Nsim + 1, interval_plot):
     
     # Extract the position 
     position = X_ref[i, 4:, 0]
-    rotated_vector = rotated_vector + position
 
     # Plot the rotated vector
     ax1.quiver(position[0], position[1], position[2],
@@ -176,7 +178,6 @@ for i in range(0, Nsim + 1, interval_plot):
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
 
     position = se3_matrix[:3, 3]
-    rotated_vector = rotated_vector + position
     
     # Plot the rotated vector
     ax2.quiver(position[0], position[1], position[2],
