@@ -314,11 +314,11 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         # TODO: Use jit for faster computation
         self.integration_method = integration_method
         if integration_method == "euler":
-            # self._f = jit(self.fd_euler)
-            self._f = self.fd_euler
+            self._f = jit(self.fd_euler)
+            # self._f = self.fd_euler
         elif integration_method == "rk4":
-            # self._f = jit(self.fd_rk4)
-            self._f = self.fd_rk4
+            self._f = jit(self.fd_rk4)
+            # self._f = self.fd_rk4
         else:
             raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
         
@@ -416,7 +416,9 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         """
 
         # psi = x[:self.error_state_size]
-        # x = x.reshape(self.state_size, 1)
+
+        x = x.reshape(self.state_size, 1)
+        u = u.reshape(self.action_size, 1)
 
         xi = x[-self.vel_state_size:]
         omega = xi[:3]
@@ -452,7 +454,8 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         if self._debug and self._debug.get('vel_zero'):
             xt_dot = xt_dot.at[-self.vel_state_size:].set(0)
         
-        return xt_dot
+        return xt_dot.reshape(self.state_size,)
+        # return xt_dot
     
     def fd_euler( self, x, u, i ):
         """ Descrtized dynamics with Eular method.
@@ -466,7 +469,8 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         Returns:
             Next state [state_size].
         """
-        return x + self.fc( x,u,i ) * self.dt
+        return x.reshape(self.state_size,) + self.fc( x,u,i ) * self.dt
+        # return x + self.fc( x,u,i ) * self.dt
     
     def fd_rk4( self, x, u, i ):
         """ Descrtized dynamics with RK4 method.
@@ -486,7 +490,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         s4 = self.fc( x+ self.dt*s3, u, i )
         x_next = x + self.dt/6 * ( s1 + 2 * s2 + 2 * s3 + s4 )
     
-        return x_next
+        return x_next.reshape(self.state_size,)
 
     def f(self, x, u, i):
         """Dynamics model.
@@ -513,6 +517,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
             df/dx [state_size, state_size].
         """
         return self._f_x(x,u,i).reshape(self.state_size,self.state_size)
+        # return self._f_x(x,u,i)
 
     def f_u(self, x, u, i):
         """Partial derivative of dynamics model with respect to u.
