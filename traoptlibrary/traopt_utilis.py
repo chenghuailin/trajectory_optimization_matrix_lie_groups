@@ -1,5 +1,6 @@
 import numpy as np
 import jax.numpy as jnp
+from jax.numpy.linalg import norm
 
 def skew( w ):
     """Get the isomorphic element in the Lie algebra for SO3, 
@@ -61,3 +62,15 @@ def adjoint( xi ):
 def coadjoint( xi ):
     """ Get the the coadjoint matrix representation of Lie Algebra."""
     return adjoint(xi).T
+
+def quat2rotm(quat):
+    """ Converts a quaternion to a rotation matrix. """
+    q = quat / norm(quat)  # Ensure the quaternion is normalized
+    q0, q1, q2, q3 = q
+
+    R = jnp.array([
+        [1 - 2 * (q2**2 + q3**2), 2 * (q1*q2 - q0*q3), 2 * (q1*q3 + q0*q2)],
+        [2 * (q1*q2 + q0*q3), 1 - 2 * (q1**2 + q3**2), 2 * (q2*q3 - q0*q1)],
+        [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
+    ])
+    return R
