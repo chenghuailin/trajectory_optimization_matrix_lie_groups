@@ -2,7 +2,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import jit
 from jax.scipy.linalg import inv
-from traopt_utilis import coadjoint, quat2rotm
+from traoptlibrary.traopt_utilis import coadjoint, quat2rotm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 

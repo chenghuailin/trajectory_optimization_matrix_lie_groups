@@ -1,5 +1,3 @@
-"""Instantaneous Cost Function."""
-
 import abc
 import numpy as np
 import jax.numpy as jnp
