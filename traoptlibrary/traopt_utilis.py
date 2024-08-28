@@ -74,3 +74,14 @@ def quat2rotm(quat):
         [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
     ])
     return R
+
+def is_pos_def(A):
+    """ Check if matrix A is PD """
+    if np.array_equal(A, A.T):
+        try:
+            np.linalg.cholesky(A)
+            return True
+        except np.linalg.LinAlgError:
+            return False
+    else:
+        return False

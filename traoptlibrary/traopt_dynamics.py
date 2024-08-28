@@ -2,6 +2,7 @@ import abc
 import numpy as np
 import jax.numpy as jnp
 from jax import jacfwd, hessian, jit
+# from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint
 from traopt_utilis import skew, adjoint, coadjoint
 
 class BaseDynamics():
@@ -305,6 +306,9 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         self._m = J[4,4]
         self._J = J
         self._Jinv = jnp.linalg.inv(J)
+
+        self._At = jnp.empty((self._state_size,self._state_size))
+        self._Bt = jnp.empty((self._state_size,self._action_size))
         
         if X_ref.shape[0] != xi_ref.shape[0]:
             raise ValueError("Group reference X and velocity reference should share the same time horizon")
@@ -389,6 +393,16 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
     def dt(self):
         """Sampling time of the system dynamics."""
         return self._dt
+    
+    @property
+    def At(self):
+        """Matrix At of the error-state linearization."""
+        return self._At
+    
+    @property
+    def Bt(self):
+        """Matrix Bt of the error-state linearization."""
+        return self._Bt
 
     def xi_ref(self, i) :
         """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
@@ -448,6 +462,9 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         # print("\nAt is shape of", At.shape, "with value \n", At)
         # print("\nBt is shape of", Bt.shape, "with value \n", Bt)
         # print("\nht is shape of", ht.shape, "with value \n", ht)
+
+        self._At = At
+        self._Bt = Bt
 
         xt_dot = At @ x + Bt @ u + ht
 

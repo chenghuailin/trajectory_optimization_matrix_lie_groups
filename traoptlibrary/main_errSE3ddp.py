@@ -22,7 +22,7 @@ seed = 24234156
 key = random.key(seed)
 
 dt = 0.01
-Nsim = 400   # Simulation horizon
+Nsim = 200   # Simulation horizon
 
 # ====================
 # Inertia Matrix
@@ -133,11 +133,20 @@ X_ref = jnp.array(X_ref)
 xi_ref = jnp.array(xi_ref)
 
 # =====================================================
+# Setup
+# =====================================================
+
+N = Nsim
+HESSIANS = False
+action_size = 6
+state_size = 12
+debug_dyn = {"vel_zero": False}
+
+# =====================================================
 # Dynamics Instantiation
 # =====================================================
 
-debug = {"vel_zero": False}
-dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, debug=debug)
+dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS, debug=debug_dyn)
 
 # =====================================================
 # Cost Instantiation
@@ -151,18 +160,13 @@ P = np.diag([
     10., 10., 10., 1., 1., 1.,
     1., 1., 1., 1., 1., 1.  
 ]) * 10
-R = np.identity(6) * 1e-5
+R = np.identity(6) * 1e1
 
 cost = ErrorStateSE3LieAlgebraAutoDiffQuadraticCost( Q, R, P, xi_ref )
 
 # =====================================================
 # Solver Instantiation
 # =====================================================
-
-N = Nsim
-HESSIANS = False
-action_size = 6
-state_size = 12
 
 x0 = jnp.zeros((state_size,))
 us_init = np.zeros((N, action_size,))
@@ -171,6 +175,29 @@ ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
+
+
+# =====================================================
+# Visualization by State
+# =====================================================
+
+plt.figure(1)
+for j in range( state_size ):
+    plt.plot( xs_ilqr[:,j], label = 'State '+str(j) )
+plt.title('ILQR Final Trajectory')
+plt.xlabel('TimeStep')
+plt.ylabel('State')
+plt.legend()
+plt.grid()
+
+plt.figure(2)
+plt.plot(J_hist_ilqr, label='ilqr')
+# plt.plot(J_hist_ddp, label='ddp')
+plt.title('Cost Comparison')
+plt.xlabel('Iteration')
+plt.ylabel('Cost')
+plt.legend()
+plt.grid()
 
 
 # =====================================================
@@ -264,5 +291,5 @@ xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
 # # Plotting
 # # =====================================================
 
-# # Display the plot
-# plt.show()
+# Display the plot
+plt.show()

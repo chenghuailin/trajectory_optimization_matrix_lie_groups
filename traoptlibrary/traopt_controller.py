@@ -2,6 +2,7 @@ import abc
 import warnings
 import numpy as np
 import time
+from traopt_utilis import is_pos_def
 
 class BaseController():
 
@@ -400,6 +401,9 @@ class iLQR(BaseController):
             #         raise PDViolationError("Quu is not PD")
             # except PDViolationError as e:
             #     print(f"Positive Definite Assumption Violation: {e}")
+
+            if not is_pos_def(Q_uu):
+                pass
 
             # Eq (6).
             k[i] = -np.linalg.solve(Q_uu, Q_u)

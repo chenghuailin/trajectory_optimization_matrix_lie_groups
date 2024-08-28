@@ -102,7 +102,7 @@ if __name__ == "__main__":
                 color='b', length=1, arrow_length_ratio=0.02, label='Rotated Vector' if i == 0 else '')
         
         positions.append(position)
-        positions.append(rotated_vector)
+        positions.append(position + rotated_vector)
 
     positions = np.array(positions)
 
