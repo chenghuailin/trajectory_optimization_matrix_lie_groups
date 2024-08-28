@@ -1,10 +1,10 @@
-from traopt_controller import iLQR
+from traoptlibrary.traopt_controller import iLQR
 import numpy as np
 import jax.numpy as jnp
 from jax import random
-from traopt_dynamics import ErrorStateSE3AutoDiffDynamics
-from traopt_cost import ErrorStateSE3LieAlgebraAutoDiffQuadraticCost
-from traopt_utilis import skew, unskew, se3_hat
+from traoptlibrary.traopt_dynamics import ErrorStateSE3AutoDiffDynamics
+from traoptlibrary.traopt_cost import ErrorStateSE3LieAlgebraAutoDiffQuadraticCost
+from traoptlibrary.traopt_utilis import skew, unskew, se3_hat
 from scipy.linalg import expm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt

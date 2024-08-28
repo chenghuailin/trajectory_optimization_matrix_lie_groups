@@ -2,8 +2,7 @@ import abc
 import numpy as np
 import jax.numpy as jnp
 from jax import jacfwd, hessian, jit
-# from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint
-from traopt_utilis import skew, adjoint, coadjoint
+from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint
 
 class BaseDynamics():
 

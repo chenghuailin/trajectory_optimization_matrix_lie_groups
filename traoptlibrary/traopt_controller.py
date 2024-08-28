@@ -2,7 +2,7 @@ import abc
 import warnings
 import numpy as np
 import time
-from traopt_utilis import is_pos_def
+from traoptlibrary.traopt_utilis import is_pos_def
 
 class BaseController():
 

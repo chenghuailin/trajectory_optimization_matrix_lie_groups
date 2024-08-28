@@ -4,7 +4,7 @@ import abc
 import numpy as np
 import jax.numpy as jnp
 from jax import jacfwd, hessian, jit
-from traopt_utilis import adjoint
+from traoptlibrary.traopt_utilis import adjoint
 
 class BaseCost():
 

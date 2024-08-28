@@ -1,6 +1,6 @@
-from traopt_controller import iLQR
-from traopt_dynamics import AutoDiffDynamics
-from traopt_cost import AutoDiffCost
+from traoptlibrary.traopt_controller import iLQR
+from traoptlibrary.traopt_dynamics import AutoDiffDynamics
+from traoptlibrary.traopt_cost import AutoDiffCost
 
 from jax import random
 import jax.numpy as jnp
