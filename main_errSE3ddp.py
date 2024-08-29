@@ -28,13 +28,6 @@ Nsim = 400   # Simulation horizon
 # Inertia Matrix
 # ====================
 
-# m = 1
-# Ib = jnp.diag(jnp.array([0.5,0.7,0.9]))
-# J = jnp.block([
-#     [Ib, jnp.zeros((3, 3))],
-#     [jnp.zeros((3, 3)), m * jnp.identity(3)]
-# ])
-
 m = 1
 Ib = np.diag([ 0.5,0.7,0.9 ])
 J = np.block([
@@ -42,33 +35,9 @@ J = np.block([
     [np.zeros((3, 3)), m * np.identity(3)]
 ])
 
-    
 # =====================================================
 # Reference Generation
 # =====================================================
-
-# q0_ref = jnp.array([1, 0, 0, 0])
-# p0_ref = jnp.array([0, 0, 0])
-# w0_ref = jnp.array([0, 0, 1]) * 1
-# v0_ref = jnp.array([1, 0, 0.1]) * 2
-
-# # x0_ref and X should be kept the same
-# x0_ref = jnp.concatenate((q0_ref, p0_ref))
-# # X = np.eye(4) # SE(3)
-# X0 = np.block([
-#     [ Quaternion(q0_ref).rotation_matrix, p0_ref.reshape(-1,1) ],
-#     # [ jnp.array(Quaternion(q0_ref).rotation_matrix), p0_ref.reshape(-1,1) ],
-#     [ np.zeros((1,3)),1 ],
-# ])
-# X = X0.copy()
-
-# xid_ref = jnp.concatenate((w0_ref, v0_ref))
-
-# X_ref = jnp.zeros((Nsim + 1, 7, 1))  # 7 because of [quat(4) + position(3)]
-# xi_ref = jnp.zeros((Nsim + 1, 6, 1)) 
-
-# X_ref = X_ref.at[0].set(x0_ref.reshape(7, 1))
-# xi_ref = xi_ref.at[0].set(xid_ref.reshape(6, 1))
 
 q0_ref = np.array([1, 0, 0, 0])
 p0_ref = np.array([0, 0, 0])
@@ -101,11 +70,6 @@ for i in range(Nsim):
     # xid_ref_rt[4] = np.cos(np.sqrt(i)) * 1
     # xid_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
 
-    # Xi = jnp.block([
-    #     [skew(xid_ref_rt[:3]), xid_ref_rt[3:6].reshape(3, 1)],
-    #     [jnp.zeros((1, 3)), 0]
-    # ])
-
     Xi = np.block([
         [skew(xid_ref_rt[:3]), xid_ref_rt[3:6].reshape(3, 1)],
         [np.zeros((1, 3)), 0]
@@ -123,11 +87,9 @@ for i in range(Nsim):
 
     # Store the reference trajectory (quaternion + position)
     X_ref[i + 1] = np.concatenate((quat, position)).reshape(7,1)
-    # X_ref = X_ref.at[i + 1].set(jnp.concatenate((quat, position)).reshape(7,1))
 
     # Store the reference twists
     xi_ref[i + 1] = xid_ref_rt.reshape(6,1)
-    # xi_ref = xi_ref.at[i + 1].set(jnp.concatenate((quat, position)).reshape(7,1))
 
 X_ref = jnp.array(X_ref)
 xi_ref = jnp.array(xi_ref)
