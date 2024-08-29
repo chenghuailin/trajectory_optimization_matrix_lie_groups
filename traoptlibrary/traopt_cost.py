@@ -372,7 +372,9 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
         Returns:
             Instantaneous cost (scalar).
         """
-        
+        x = x.reshape(self.state_size, 1)
+        u = u.reshape(self.action_size, 1)
+
         Ct = jnp.block([
             [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
             [ -adjoint( self.xi_ref(i) ), jnp.identity( self.vel_state_size ) ],
@@ -394,6 +396,7 @@ class ErrorStateSE3LieAlgebraAutoDiffQuadraticCost(BaseCost):
         Returns:
             Terminal cost (scalar).
         """
+        x = x.reshape(self.state_size, 1)
         
         Ct = jnp.block([
             [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
