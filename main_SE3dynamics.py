@@ -28,10 +28,9 @@ def SE3Dyn(x, u, i, I):
     # print(dQuat)
 
     # Convert quaternion to rotation matrix
-    # R_matrix = quat2rotm(q).T  # Transpose for correct orientation
-    # quat = Quaternion(jnp.array(q))  # Extract the quaternion from the X_ref data
-    # R_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
-    R_matrix = quat2rotm(q)
+    quat = Quaternion(jnp.array(q))  # Extract the quaternion from the X_ref data
+    R_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
+    # R_matrix = quat2rotm(q)
 
     # Position and velocity derivative
     # print((R_matrix @ v).shape)
