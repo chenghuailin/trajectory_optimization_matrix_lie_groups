@@ -22,7 +22,7 @@ seed = 24234156
 key = random.key(seed)
 
 dt = 0.01
-Nsim = 200   # Simulation horizon
+Nsim = 400   # Simulation horizon
 
 # ====================
 # Inertia Matrix
@@ -160,7 +160,7 @@ P = np.diag([
     10., 10., 10., 1., 1., 1.,
     1., 1., 1., 1., 1., 1.  
 ]) * 10
-R = np.identity(6) * 1e1
+R = np.identity(6) * 1e-5
 
 cost = ErrorStateSE3LieAlgebraAutoDiffQuadraticCost( Q, R, P, xi_ref )
 
@@ -184,7 +184,7 @@ xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
 plt.figure(1)
 for j in range( state_size ):
     plt.plot( xs_ilqr[:,j], label = 'State '+str(j) )
-plt.title('ILQR Final Trajectory')
+plt.title('iLQR Final Trajectory')
 plt.xlabel('TimeStep')
 plt.ylabel('State')
 plt.legend()
@@ -204,87 +204,71 @@ plt.grid()
 # Visualization with Vector
 # =====================================================
 
-# interval_plot = int((Nsim + 1) / 40)
-# lim = 5
+interval_plot = int((Nsim + 1) / 40)
+lim = 5
 
-# # Initialize the plot
-# fig1 = plt.figure(1)
-# ax1 = fig1.add_subplot(121, projection='3d')
-# ax2 = fig1.add_subplot(122, projection='3d')
+# Initialize the plot
+fig1 = plt.figure(3)
+ax1 = fig1.add_subplot(121, projection='3d')
+ax2 = fig1.add_subplot(122, projection='3d')
 
-# # Define an initial vector and plot on figure
-# initial_vector = np.array([1, 0, 0])  # Example initial vector
-# ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
-# ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+# Define an initial vector and plot on figure
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
 
-# # Loop through quaternion data to plot rotated vectors
-# for i in range(0, Nsim + 1, interval_plot):  
+# Loop through quaternion data to plot rotated vectors
+for i in range(0, Nsim + 1, interval_plot):  
 
-#     # =========== 1. Plot the reference trajectory ===========
+    # =========== 1. Plot the reference trajectory ===========
 
-#     quat = Quaternion(X_ref[i, :4, 0])  # Extract the quaternion from the X_ref data
-#     rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
-#     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    quat = Quaternion(X_ref[i, :4, 0])  # Extract the quaternion from the X_ref data
+    rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
-#     # Extract the position 
-#     position = X_ref[i, 4:, 0]
-#     rotated_vector = rotated_vector + position
+    # Extract the position 
+    position = X_ref[i, 4:, 0]
 
-#     # Plot the rotated vector
-#     ax1.quiver(position[0], position[1], position[2],
-#               rotated_vector[0], rotated_vector[1], rotated_vector[2],
-#               color='b', length=1, label='Rotated Vector' if i == 0 else '')
-
-#     # =========== 2. Plot the simulated velocity ===========
+    # Plot the rotated vector
+    ax1.quiver(position[0], position[1], position[2],
+              rotated_vector[0], rotated_vector[1], rotated_vector[2],
+              color='b', length=1, label='Rotated Vector' if i == 0 else '')
     
-#     # se3_matrix = expm( se3_hat( x_sim_list[i, 6:, :] ))
-#     # rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
-#     # rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    # =========== 2. Plot the simulated error-state configuration trajectory ===========
 
-#     # position = se3_matrix[:3, 3]
-#     # rotated_vector = rotated_vector + position
+    se3_matrix = np.block([
+        [Quaternion(X_ref[i, :4, 0]).rotation_matrix, X_ref[i, 4:].reshape(3, 1)],
+        [ np.zeros((1,3)), 1 ],
+    ]) @ expm( se3_hat( xs_ilqr[i, :6]) )
     
-#     # # Plot the rotated vector
-#     # ax2.quiver(position[0], position[1], position[2],
-#     #           rotated_vector[0], rotated_vector[1], rotated_vector[2],
-#     #           color='b', length=1, label='Rotated Vector' if i == 0 else '')
+    rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+
+    position = se3_matrix[:3, 3]
     
-#     # =========== 3. Plot the simulated error-state configuration trajectory ===========
-
-#     se3_matrix = np.block([
-#         [Quaternion(X_ref[i, :4]).rotation_matrix, X_ref[i, 4:].reshape(3, 1)],
-#         [ np.zeros((1,3)), 1 ],
-#     ]) @ expm( se3_hat(x_sim_list[i, :6, :]) )
-    
-#     rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
-#     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
-
-#     position = se3_matrix[:3, 3]
-#     rotated_vector = rotated_vector + position
-    
-#     # Plot the rotated vector
-#     ax2.quiver(position[0], position[1], position[2],
-#               rotated_vector[0], rotated_vector[1], rotated_vector[2],
-#               color='b', length=1, label='Rotated Vector' if i == 0 else '')
+    # Plot the rotated vector
+    ax2.quiver(position[0], position[1], position[2],
+              rotated_vector[0], rotated_vector[1], rotated_vector[2],
+              color='b', length=1, label='Rotated Vector' if i == 0 else '')
 
 
-# # Set the limits for the axes
+# Set the limits for the axes
 
-# ax1.set_xlim([-lim, lim]) 
-# ax1.set_ylim([-lim, lim])
-# ax1.set_zlim([-lim, lim])
-# ax1.legend()
-# ax1.set_xlabel('X')
-# ax1.set_ylabel('Y')
-# ax1.set_zlabel('Z')
+ax1.set_xlim([-lim, lim]) 
+ax1.set_ylim([-lim, lim])
+ax1.set_zlim([-lim, lim])
+ax1.legend()
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('Z')
 
-# ax2.set_xlim([-lim, lim])  
-# ax2.set_ylim([-lim, lim])
-# ax2.set_zlim([-lim, lim])
-# ax2.legend()
-# ax2.set_xlabel('X')
-# ax2.set_ylabel('Y')
-# ax2.set_zlabel('Z')
+ax2.set_xlim([-lim, lim])  
+ax2.set_ylim([-lim, lim])
+ax2.set_zlim([-lim, lim])
+ax2.legend()
+ax2.set_xlabel('X')
+ax2.set_ylabel('Y')
+ax2.set_zlabel('Z')
 
 
 # # =====================================================
