@@ -93,8 +93,8 @@ class iLQR(BaseController):
                 us: optimal control path [N, action_size].
         """
         # Reset regularization term.
-        self._mu = 1.0
-        # self._mu = 0.0
+        # self._mu = 1.0
+        self._mu = 0.0
         self._delta = self._delta_0
 
         # Add time 
@@ -186,7 +186,7 @@ class iLQR(BaseController):
             time_calc = end_time - start_time   
             # print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
 
-            # accepted = True
+            accepted = True
             if not accepted:
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
