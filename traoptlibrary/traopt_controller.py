@@ -93,8 +93,8 @@ class iLQR(BaseController):
                 us: optimal control path [N, action_size].
         """
         # Reset regularization term.
-        # self._mu = 1.0
-        self._mu = 0.0
+        self._mu = 1.0
+        # self._mu = 0.0
         self._delta = self._delta_0
 
         # Add time 
@@ -120,7 +120,7 @@ class iLQR(BaseController):
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
-            print("Iteration:", iteration, ", Used Time:", time_calc )
+            print("Start Iteration:", iteration, ", Used Time:", time_calc )
 
             # Forward rollout only if it needs to be recomputed.
             if changed:
@@ -186,7 +186,7 @@ class iLQR(BaseController):
             time_calc = end_time - start_time   
             # print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
 
-            accepted = True
+            # accepted = True
             if not accepted:
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
@@ -402,7 +402,7 @@ class iLQR(BaseController):
             # except PDViolationError as e:
             #     print(f"Positive Definite Assumption Violation: {e}")
 
-            if not is_pos_def(Q_uu):
+            if not is_pos_def(Q_uu + Q_uu.T):
                 pass
 
             # Eq (6).
@@ -471,6 +471,7 @@ class iLQR(BaseController):
         reg = self._mu * np.eye(self.dynamics.state_size)
         Q_ux = l_ux + f_u.T.dot(V_xx + reg).dot(f_x)
         Q_uu = l_uu + f_u.T.dot(V_xx + reg).dot(f_u)
+        # Q_uu = 0.5 * (Q_uu + Q_uu.T) 
 
         if self._use_hessians:
             Q_xx += np.tensordot(V_x, f_xx, axes=1)

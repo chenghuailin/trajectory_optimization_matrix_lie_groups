@@ -16,13 +16,13 @@ def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, alpha, mu,
     info = "converged" if converged else ("accepted" if accepted else "failed")
     # final_state = xs[-1]
     # print("iteration", iteration_count, info, J_opt, "\n", final_state, "\n", alpha, mu)
-    print("iteration", iteration_count, info, J_opt, alpha, mu)
+    print("Iteration", iteration_count, info, J_opt, alpha, mu)
 
 seed = 24234156
 key = random.key(seed)
 
 dt = 0.01
-Nsim = 400   # Simulation horizon
+Nsim = 1400   # Simulation horizon
 
 # ====================
 # Inertia Matrix
@@ -171,13 +171,13 @@ lim = 5
 
 # Initialize the plot
 fig1 = plt.figure(3)
-ax1 = fig1.add_subplot(121, projection='3d')
-ax2 = fig1.add_subplot(122, projection='3d')
+ax1 = fig1.add_subplot(111, projection='3d')
+# ax2 = fig1.add_subplot(122, projection='3d')
 
 # Define an initial vector and plot on figure
 initial_vector = np.array([1, 0, 0])  # Example initial vector
 ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
-ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+# ax2.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
 
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, interval_plot):  
@@ -194,7 +194,7 @@ for i in range(0, Nsim + 1, interval_plot):
     # Plot the rotated vector
     ax1.quiver(position[0], position[1], position[2],
               rotated_vector[0], rotated_vector[1], rotated_vector[2],
-              color='b', length=1, label='Rotated Vector' if i == 0 else '')
+              color='b', length=1, label='Reference Configuration' if i == 0 else '')
     
     # =========== 2. Plot the simulated error-state configuration trajectory ===========
 
@@ -209,9 +209,9 @@ for i in range(0, Nsim + 1, interval_plot):
     position = se3_matrix[:3, 3]
     
     # Plot the rotated vector
-    ax2.quiver(position[0], position[1], position[2],
+    ax1.quiver(position[0], position[1], position[2],
               rotated_vector[0], rotated_vector[1], rotated_vector[2],
-              color='b', length=1, label='Rotated Vector' if i == 0 else '')
+              color='r', length=1, label='Error-State Configuration' if i == 0 else '')
 
 
 # Set the limits for the axes
@@ -224,13 +224,13 @@ ax1.set_xlabel('X')
 ax1.set_ylabel('Y')
 ax1.set_zlabel('Z')
 
-ax2.set_xlim([-lim, lim])  
-ax2.set_ylim([-lim, lim])
-ax2.set_zlim([-lim, lim])
-ax2.legend()
-ax2.set_xlabel('X')
-ax2.set_ylabel('Y')
-ax2.set_zlabel('Z')
+# ax2.set_xlim([-lim, lim])  
+# ax2.set_ylim([-lim, lim])
+# ax2.set_zlim([-lim, lim])
+# ax2.legend()
+# ax2.set_xlabel('X')
+# ax2.set_ylabel('Y')
+# ax2.set_zlabel('Z')
 
 
 # # =====================================================
