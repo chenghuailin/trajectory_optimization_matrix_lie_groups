@@ -4,19 +4,20 @@ import jax.numpy as jnp
 from jax import random
 from traoptlibrary.traopt_dynamics import ErrorStateSE3AutoDiffDynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3LieAlgebraAutoDiffQuadraticCost
-from traoptlibrary.traopt_utilis import skew, unskew, se3_hat
-from scipy.linalg import expm
+from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee
+from scipy.linalg import expm, logm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 
-def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, alpha, mu, J_hist, xs_hist, us_hist):
+def on_iteration(iteration_count, xs, us, J_opt, accepted, converged,grad_wrt_input_norm,
+                  alpha, mu, J_hist, xs_hist, us_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
     info = "converged" if converged else ("accepted" if accepted else "failed")
     # final_state = xs[-1]
     # print("iteration", iteration_count, info, J_opt, "\n", final_state, "\n", alpha, mu)
-    print("Iteration", iteration_count, info, J_opt, alpha, mu)
+    print("Iteration", iteration_count, info, J_opt, grad_wrt_input_norm, alpha, mu)
 
 seed = 24234156
 key = random.key(seed)
@@ -47,11 +48,11 @@ v0_ref = np.array([1, 0, 0.1]) * 2
 # x0_ref and X should be kept the same
 x0_ref = np.concatenate((q0_ref, p0_ref))
 # X = np.eye(4) # SE(3)
-X0 = np.block([
+X0_ref = np.block([
     [ Quaternion(q0_ref).rotation_matrix, p0_ref.reshape(-1,1) ],
     [ np.zeros((1,3)),1 ],
 ])
-X = X0.copy()
+X = X0_ref.copy()
 
 xid_ref = np.concatenate((w0_ref, v0_ref))
 
@@ -130,7 +131,20 @@ cost = ErrorStateSE3LieAlgebraAutoDiffQuadraticCost( Q, R, P, xi_ref )
 # Solver Instantiation
 # =====================================================
 
-x0 = jnp.zeros((state_size,))
+q0 = np.array([1., 0., 0., 0.])
+p0 = np.array([-1., -1., 0.2])
+# w0 = np.array([0, 0, 1]) * 1
+# v0 = np.array([1, 0, 0.1]) * 2
+w0 = np.array([0., 0., 0.]) 
+v0 = np.array([0., 0.5, 0.])
+X0 = np.block([
+    [ Quaternion(q0).rotation_matrix, p0.reshape(-1,1) ],
+    [ np.zeros((1,3)),1 ],
+])
+x0 = np.concatenate(( se3_vee(logm( np.linalg.inv(X0_ref) @ X0 )), w0, v0))
+print(x0)
+x0 = jnp.array(x0)
+
 us_init = np.zeros((N, action_size,))
 
 ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
@@ -143,14 +157,25 @@ xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
 # Visualization by State
 # =====================================================
 
-plt.figure(1)
+fig1 = plt.figure(1)
+ax1 = fig1.add_subplot(121)
+ax2 = fig1.add_subplot(122)
+
 for j in range( state_size ):
-    plt.plot( xs_ilqr[:,j], label = 'State '+str(j) )
-plt.title('iLQR Final Trajectory')
-plt.xlabel('TimeStep')
-plt.ylabel('State')
-plt.legend()
-plt.grid()
+    ax1.plot( xs_ilqr[:,j], label = 'State '+str(j) )
+ax1.set_title('iLQR Final Trajectory')
+ax1.set_xlabel('TimeStep')
+ax1.set_ylabel('State')
+ax1.legend()
+ax1.grid()
+
+for j in range( action_size ):
+    ax2.plot( us_ilqr[:,j], label = 'Input '+str(j) )
+ax2.set_title('iLQR Final Input')
+ax2.set_xlabel('TimeStep')
+ax2.set_ylabel('Input')
+ax2.legend()
+ax2.grid()
 
 plt.figure(2)
 plt.plot(J_hist_ilqr, label='ilqr')

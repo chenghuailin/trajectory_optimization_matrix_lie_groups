@@ -84,13 +84,14 @@ def l_terminal(x,i):
     Q_terminal = jnp.diag( jnp.array([100,100,10000,100]) )
     return 0.5 * x_diff.T @ Q_terminal @ x_diff
 
-def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, alpha, mu, J_hist, xs_hist, us_hist):
+def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, grad_wrt_input_norm,
+                 alpha, mu, J_hist, xs_hist, us_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
     info = "converged" if converged else ("accepted" if accepted else "failed")
     final_state = xs[-1]
-    print("iteration", iteration_count, info, J_opt, final_state, alpha, mu)
+    print("iteration", iteration_count, info, J_opt, final_state, grad_wrt_input_norm, alpha, mu)
     
 
 if __name__ == "__main__":
@@ -208,6 +209,14 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid()
 
+    plt.figure(4)
+    plt.plot(us_ilqr, label='ilqr')
+    plt.plot(us_ddp, label='ddp')
+    plt.title('Input Comparison')
+    plt.xlabel('Iteration')
+    plt.ylabel('Input')
+    plt.legend()
+    plt.grid()
 
     xs_hist_ilqr = np.array(xs_hist_ilqr)
     us_hist_ilqr = np.array(us_hist_ilqr)

@@ -80,8 +80,8 @@ if __name__ == "__main__":
         [np.zeros((1,3)), m],
     ])
     W_sqrt = sqrtm(W)
-    print(W)
-    print(W_sqrt)
+    # print(W)
+    # print(W_sqrt)
 
 # =====================================================
 # Quaternion Dynamics Simulation
