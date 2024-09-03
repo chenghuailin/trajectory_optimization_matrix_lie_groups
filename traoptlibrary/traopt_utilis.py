@@ -49,6 +49,25 @@ def se3_hat( xi ):
     else:
         raise ValueError("Input must be a 6d np or jnp array")
     
+def se3_vee(se3_mat):
+
+    """Given an se(3) matrix, 
+        return the isomorphic cartesian 6d vector [omega, pos]."""
+    
+    if isinstance(se3_mat, (jnp.ndarray, np.ndarray)) and se3_mat.shape == (4, 4):
+        
+        # Use the unskew function to get ω from skew(ω)
+        omega = unskew(se3_mat[:3, :3])
+        
+        # Extract the translation vector pos (top-right 3x1 part)
+        pos = se3_mat[:3, 3].reshape(3,)
+                
+        # Combine ω and pos into the 6d vector
+        return jnp.concatenate((omega, pos))
+    else:
+        raise ValueError("Input must be a 4x4 np or jnp array representing an se(3) matrix")
+
+    
 def adjoint( xi ):
     """ Get the the adjoint matrix representation of Lie Algebra."""
     w = jnp.array([xi[0], xi[1], xi[2]])
