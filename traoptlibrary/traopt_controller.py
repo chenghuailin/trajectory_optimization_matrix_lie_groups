@@ -62,12 +62,16 @@ class iLQR(BaseController):
         self._delta_0 = 2.0
         self._delta = self._delta_0
 
-        self._k = np.zeros((N, dynamics.action_size))
-        self._K = np.zeros((N, dynamics.action_size, dynamics.state_size))
+        self._action_size = dynamics.action_size
+        self._state_size = dynamics.state_size
+
+        self._k = np.zeros((N, self._action_size))
+        self._K = np.zeros((N, self._action_size, self._state_size))
 
         super(iLQR, self).__init__()
 
-    def fit(self, x0, us_init, n_iterations=100, tol=1e-6, on_iteration=None):
+    def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-3,
+             on_iteration=None):
         """Computes the optimal controls.
 
         Args:
@@ -147,8 +151,16 @@ class iLQR(BaseController):
                     xs_new, us_new = self._control(xs, us, k, K, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
 
+                    _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
+                    if grad_wrt_input_norm < tol_grad_norm:
+                        converged = True
+                        accepted = True
+                        break
+
                     if J_new < J_opt:
-                        if np.abs((J_opt - J_new) / J_opt) < tol:
+                        if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                        # if np.abs(J_opt - J_new) < tol:
+                        # if grad_wrt_input_norm < tol:
                             converged = True
 
                         J_opt = J_new
@@ -196,8 +208,8 @@ class iLQR(BaseController):
                     break
 
             if on_iteration:
-                on_iteration(iteration, xs, us, J_opt, accepted, converged, alpha, self._mu,  
-                             J_hist, xs_hist, us_hist)
+                on_iteration(iteration, xs, us, J_opt, accepted, converged, grad_wrt_input_norm,
+                             alpha, self._mu, J_hist, xs_hist, us_hist)
 
             if converged:
                 break
@@ -479,3 +491,31 @@ class iLQR(BaseController):
             Q_uu += np.tensordot(V_x, f_uu, axes=1)
 
         return Q_x, Q_u, Q_xx, Q_ux, Q_uu
+    
+    def _gradient_wrt_control(self, F_x, F_u, L_x, L_u):
+        """Solve adjoint equations using a for loop.
+
+        Args:
+            F_x: dynamics Jacobians with respect to state.
+            F_u: dynamics Jacobians with respect to control.
+            L_x: cost gradients with respect to state.
+            L_u: cost gradients with respect to control.
+
+        Returns:
+            gradient, adjoints, final adjoint variable.
+        """
+
+        # P = np.zeros((self.N + 1, self._state_size))
+        g = np.zeros((self.N, self._action_size))
+
+        p = L_x[self.N] # Initialize adjoint variable with terminal cost gradient
+        # P[self.N] = p
+        g_norm_sum = 0
+        
+        for t in range(self.N - 1, -1, -1):  # backward recursion of Adjoint equations.
+            g[t] = L_u[t] + np.matmul(F_u[t].T, p)
+            p = L_x[t] + np.matmul(F_x[t].T, p) 
+            g_norm_sum = g_norm_sum + np.linalg.norm(g[t])
+            # P[t] = p
+
+        return g, g_norm_sum/self.N
