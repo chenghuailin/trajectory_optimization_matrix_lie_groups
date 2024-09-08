@@ -554,7 +554,7 @@ class iLQR_ErrorState(BaseController):
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
 
-        super(iLQR, self).__init__()
+        super(iLQR_ErrorState, self).__init__()
 
     def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-3,
              on_iteration=None):
@@ -690,10 +690,19 @@ class iLQR_ErrorState(BaseController):
 
             # TODO: not sure if reinitialization should be here 
             # or before converged checkpoint ??
-            if not self._tracking:
+            if accepted and (not self._tracking) :
                 print(f"Iteration {iteration} reference update")
                 new_X_ref, _ = self.dynamics.ref_reinitialize( xs )
+
+                end_time = time.perf_counter()
+                time_calc = end_time - start_time   
+                print("Iteration", iteration, "Error-state dynamics reinitialization finished, Used Time:", time_calc )
+
                 _ = self.cost.ref_reinitialize( new_X_ref )
+
+                end_time = time.perf_counter()
+                time_calc = end_time - start_time   
+                print("Iteration", iteration, "Error-state cost reinitialization finished, Used Time:", time_calc )
 
         # Store fit parameters.
         self._k = k

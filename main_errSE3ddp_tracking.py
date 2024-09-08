@@ -40,7 +40,7 @@ J = np.block([
 ])
 
 # =====================================================
-# Reference Generation
+# Reference Generation (Also the tracking reference)
 # =====================================================
 
 q0_ref = np.array([1, 0, 0, 0])
@@ -122,17 +122,17 @@ dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS
 # This cost penalizes both error deviation and velocity of error (both on Lie algebra)
 # (The same as the Sangli's paper)
 
-# Q = np.diag([ 
-#     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1. 
-# ])
-# P = np.diag([
-#     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1.  
-# ]) * 10
-# R = np.identity(6) * 1e-5
+Q = np.diag([ 
+    10., 10., 10., 1., 1., 1.,
+    1., 1., 1., 1., 1., 1. 
+])
+P = np.diag([
+    10., 10., 10., 1., 1., 1.,
+    1., 1., 1., 1., 1., 1.  
+]) * 10
+R = np.identity(6) * 1e-5
 
-# cost = ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost( Q, R, P, xi_ref )
+cost = ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost( Q, R, P, xi_ref )
 
 # ------------- B. First order cost penalty  ------------- 
 # This cost only penalize the Lie algebra element of the error state, so only first order
@@ -173,24 +173,6 @@ dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS
 
 # cost = AutoDiffCost( l, l_terminal, state_size, action_size )
 
-# ------------- D. Trajecotry Generation Cost 1st Order  ------------- 
-
-Q = np.diag([ 
-    10., 10., 10., 1., 1., 1.,
-])
-P = np.diag([
-    10., 10., 10., 1., 1., 1.,
-]) * 10
-R = np.identity(6) * 1e-5
-
-quat_goal = np.array([ 1., 0., 0., 0. ])
-pos_goal = np.array([ 10., 10., 10. ])
-q_goal = quatpos2SE3( np.concatenate((quat_goal, pos_goal)) )
-print(q_goal)
-
-cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P,X_ref, q_goal)
-
-
 # =====================================================
 # Solver Instantiation
 # =====================================================
@@ -213,7 +195,7 @@ us_init = np.zeros((N, action_size,))
 
 # ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
 ilqr = iLQR_ErrorState(dynamics, cost, N, 
-                       hessians=HESSIANS, tracking=False)
+                       hessians=HESSIANS, tracking=True)
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
@@ -258,7 +240,7 @@ plt.grid()
 # =====================================================
 
 interval_plot = int((Nsim + 1) / 40)
-lim = 15
+lim = 5
 
 # Initialize the plot
 fig1 = plt.figure(3)
