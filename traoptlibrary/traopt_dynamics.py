@@ -2,7 +2,9 @@ import abc
 import numpy as np
 import jax.numpy as jnp
 from jax import jacfwd, hessian, jit
-from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint
+from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint, quatpos2SE3, se3_hat, SE32quatpos, se3_vee
+# from jax.scipy.linalg import expm
+from scipy.linalg import logm, expm
 
 class BaseDynamics():
 
@@ -281,7 +283,10 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
             X_ref: List of Lie Group reference, (N, error_state_size, 1)
             xi_ref: List of velocity reference, described in Lie Algebra,
                  (N, velocity_size, 1)
-            dt: Sampling time
+            dt: Sampling time.
+            integration_method: integration method for dynamics,
+                "euler": euler method,
+                "rk4": Runga Kutta 4 method.
             state_size: Tuple of State variable dimension, 
                 ( error state size, velocity state size ).
             action_size: Input variable dimension.
@@ -311,7 +316,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         
         if X_ref.shape[0] != xi_ref.shape[0]:
             raise ValueError("Group reference X and velocity reference should share the same time horizon")
-        self._horizon = X_ref.shape[0]
+        self._N = X_ref.shape[0] - 1
         self._dt = dt
 
         # TODO: Use jit for faster computation
@@ -384,9 +389,9 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         return self._Jinv
 
     @property
-    def horizon(self):
+    def N(self):
         """The horizon for dynamics to be valid, due to horizon of given reference."""
-        return self._horizon
+        return self._N
     
     @property
     def dt(self):
@@ -414,6 +419,23 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
     def x_ref(self, i) :
         """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
         return self._x_ref[i]
+    
+    def ref_reinitialize( self, xs ) :
+        """Re-initialize the error-state dynamics, with the new error-state rollout trajecotory."""
+        
+        for i in range(self.N + 1):
+            # temp = quatpos2SE3( self._X_ref[i] ) @ expm( se3_hat( xs[i, :6]) )
+            # print( temp )
+            self._X_ref = self._X_ref.at[i].set( 
+                SE32quatpos( 
+                    quatpos2SE3( self._X_ref[i] ) @ expm( se3_hat( xs[i, :6]) )
+                )
+            )
+            self._xi_ref = self._xi_ref.at[i].set(
+                se3_vee( logm( quatpos2SE3( self._X_ref[i]) ).real ).reshape((6,1))
+            )
+        
+        return self._X_ref, self._xi_ref
 
     def fc(self, x, u, i):
         """ Continuous linearized dynamicsf.
