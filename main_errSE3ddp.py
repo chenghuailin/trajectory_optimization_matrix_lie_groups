@@ -1,10 +1,12 @@
-from traoptlibrary.traopt_controller import iLQR
+from traoptlibrary.traopt_controller import iLQR, iLQR_ErrorState
 import numpy as np
+import jax
 import jax.numpy as jnp
 from jax import random
 from traoptlibrary.traopt_dynamics import ErrorStateSE3AutoDiffDynamics
-from traoptlibrary.traopt_cost import ErrorStateSE3LieAlgebraAutoDiffQuadraticCost
-from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee
+from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, AutoDiffCost
+from traoptlibrary.traopt_cost import ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost
+from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3
 from scipy.linalg import expm, logm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
@@ -21,6 +23,7 @@ def on_iteration(iteration_count, xs, us, J_opt, accepted, converged,grad_wrt_in
 
 seed = 24234156
 key = random.key(seed)
+jax.config.update("jax_enable_x64", True)
 
 dt = 0.01
 Nsim = 1400   # Simulation horizon
@@ -115,17 +118,78 @@ dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS
 # Cost Instantiation
 # =====================================================
 
+# ------------- A. Second order cost as Sangli's paper ----------------
+# This cost penalizes both error deviation and velocity of error (both on Lie algebra)
+# (The same as the Sangli's paper)
+
+# Q = np.diag([ 
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1. 
+# ])
+# P = np.diag([
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1.  
+# ]) * 10
+# R = np.identity(6) * 1e-5
+
+# cost = ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost( Q, R, P, xi_ref )
+
+# ------------- B. First order cost penalty  ------------- 
+# This cost only penalize the Lie algebra element of the error state, so only first order
+
+# def l(x,u,i):
+#     R = np.identity(6) * 1e-5
+#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
+#                              0., 0., 0., 0., 0., 0. ]) )
+
+#     return u.T @ R @ u + x.T @ Q @ x
+
+# def l_terminal(x,i):
+#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
+#                              0., 0., 0., 0., 0., 0. ]) ) * 10
+    
+#     return x.T @ Q @ x
+
+# cost = AutoDiffCost( l, l_terminal, state_size, action_size )
+
+# ------------- C. Full error-state penalty  ------------- 
+# This penalize the error state deviation, and the velocity of configuration
+# 
+# Doesn't really work, cuz the reference configuration has velocity itself, 
+# which shouldn't be penalized if to track the reference
+
+# def l(x,u,i):
+#     R = np.identity(6) * 1e-5
+#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
+#                              1., 1., 1., 1., 1., 1. ]) )
+
+#     return u.T @ R @ u + x.T @ Q @ x
+
+# def l_terminal(x,i):
+#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
+#                              1., 1., 1., 1., 1., 1. ]) ) * 10
+    
+#     return x.T @ Q @ x
+
+# cost = AutoDiffCost( l, l_terminal, state_size, action_size )
+
+# ------------- D. Trajecotry Generation Cost 1st Order  ------------- 
+
 Q = np.diag([ 
     10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1. 
 ])
 P = np.diag([
     10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.  
 ]) * 10
 R = np.identity(6) * 1e-5
 
-cost = ErrorStateSE3LieAlgebraAutoDiffQuadraticCost( Q, R, P, xi_ref )
+quat_goal = np.array([ 1., 0., 0., 0. ])
+pos_goal = np.array([ 10., 10., 10. ])
+q_goal = quatpos2SE3( np.concatenate((quat_goal, pos_goal)) )
+print(q_goal)
+
+cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P,X_ref, q_goal)
+
 
 # =====================================================
 # Solver Instantiation
@@ -147,7 +211,9 @@ x0 = jnp.array(x0)
 
 us_init = np.zeros((N, action_size,))
 
-ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
+# ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
+ilqr = iLQR_ErrorState(dynamics, cost, N, 
+                       hessians=HESSIANS, tracking=False)
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
@@ -192,7 +258,7 @@ plt.grid()
 # =====================================================
 
 interval_plot = int((Nsim + 1) / 40)
-lim = 5
+lim = 15
 
 # Initialize the plot
 fig1 = plt.figure(3)
@@ -223,10 +289,12 @@ for i in range(0, Nsim + 1, interval_plot):
     
     # =========== 2. Plot the simulated error-state configuration trajectory ===========
 
-    se3_matrix = np.block([
-        [Quaternion(X_ref[i, :4, 0]).rotation_matrix, X_ref[i, 4:].reshape(3, 1)],
-        [ np.zeros((1,3)), 1 ],
-    ]) @ expm( se3_hat( xs_ilqr[i, :6]) )
+    # se3_matrix = np.block([
+    #     [Quaternion(X_ref[i, :4, 0]).rotation_matrix, X_ref[i, 4:].reshape(3, 1)],
+    #     [ np.zeros((1,3)), 1 ],
+    # ]) @ expm( se3_hat( xs_ilqr[i, :6]) )
+
+    se3_matrix = quatpos2SE3( X_ref[i] ) @ expm( se3_hat( xs_ilqr[i, :6]) )
     
     rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector

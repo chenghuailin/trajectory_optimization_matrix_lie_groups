@@ -104,7 +104,6 @@ dyn_se3 = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, debug=debug)
 
 x0 = np.zeros((12,))
 x0[6:] = xid_ref.reshape(6,)
-# u = np.zeros((6,))
 u = np.array([ 0, 0, 0, 0, 1, 0 ])
 x_sim_list = np.zeros(( Nsim+1, 12 ))
 

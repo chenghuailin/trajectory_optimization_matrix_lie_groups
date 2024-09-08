@@ -55,8 +55,8 @@ def SE3Dyn(x, u, i, I):
 
 if __name__ == "__main__":
 
-    u = jnp.array([ 0, 0, 1, 0, 1, 0 ])
-    # u = jnp.array([ 0, 0, 1, 2, 0, 0.2 ])
+    # u = jnp.array([ 0, 0, 1, 0, 1, 0 ])
+    u = jnp.array([ 0, 0, 1, 2, 0, 0.2 ])
 
     q0_ref = np.array([1, 0, 0, 0])
     p0_ref = np.array([0, 0, 0])
