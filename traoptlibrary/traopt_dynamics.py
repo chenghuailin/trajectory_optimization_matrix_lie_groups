@@ -1,10 +1,11 @@
 import abc
 import numpy as np
 import jax.numpy as jnp
+import jax
 from jax import jacfwd, hessian, jit
-from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint, quatpos2SE3, se3_hat, SE32quatpos, se3_vee
-# from jax.scipy.linalg import expm
-from scipy.linalg import logm, expm
+from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint, quatpos2SE3, se3_hat, SE32quatpos, se3_vee, rotm2quat
+from jax.scipy.linalg import expm
+from scipy.linalg import logm
 
 class BaseDynamics():
 
@@ -420,12 +421,20 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
         return self._x_ref[i]
     
-    def ref_reinitialize( self, xs ) :
-        """Re-initialize the error-state dynamics, with the new error-state rollout trajecotory."""
+    def ref_reinitialize_serial( self, xs ) :
+        """Re-initialize the error-state dynamics, with the new error-state rollout trajecotory.
+            In serial programming style, not recommended, only for comparison.
+        """
         
         for i in range(self.N + 1):
             # temp = quatpos2SE3( self._X_ref[i] ) @ expm( se3_hat( xs[i, :6]) )
             # print( temp )
+            
+            # if i == 104 or i == 105:
+            #     se3_new = quatpos2SE3( self._X_ref[i] ) @ expm( se3_hat( xs[i, :6]) )
+            #     print(f"converted quat is {i}: {rotm2quat(se3_new[:3,:3])}")
+            #     pass
+
             self._X_ref = self._X_ref.at[i].set( 
                 SE32quatpos( 
                     quatpos2SE3( self._X_ref[i] ) @ expm( se3_hat( xs[i, :6]) )
@@ -435,6 +444,42 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
                 se3_vee( logm( quatpos2SE3( self._X_ref[i]) ).real ).reshape((6,1))
             )
         
+        return self._X_ref, self._xi_ref
+
+    def ref_reinitialize(self, xs):
+        """Re-initialize the error-state dynamics, 
+        with the new error-state rollout trajectory in a parallel style."""
+        
+        def update_Xref(X_ref, x):
+
+            # m = se3_hat(x[:6])
+            # c = 2.42
+            # squarings = jnp.maximum( 0, jnp.ceil(jnp.log2(jnp.linalg.norm(m, ord=1)) - c) )
+            # X_ref_new = SE32quatpos(
+            #     quatpos2SE3(X_ref) @ 
+            #     jnp.linalg.matrix_power(expm( m/(2**squarings)), 2**squarings)
+            # )
+            # return X_ref_new
+
+            X_ref_new = SE32quatpos( 
+                    quatpos2SE3(X_ref) @ expm( se3_hat(x[:6]) )
+            )
+            return X_ref_new
+
+        # Use vmap to parallelize the update_ref function
+        vec_update_fn = jax.vmap(update_Xref)
+        vec_update_fn = jax.jit(vec_update_fn)
+
+        # print(f"X_ref has type: {type(self._X_ref)}")
+        # print(f"xi_ref has type: {type(self._xi_ref)}")
+
+        self._X_ref= vec_update_fn(self._X_ref, xs)
+
+        for i in range(self.N + 1):
+            self._xi_ref = self._xi_ref.at[i].set(
+                se3_vee( logm( quatpos2SE3( self._X_ref[i]) ).real ).reshape((6,1))
+            )
+
         return self._X_ref, self._xi_ref
 
     def fc(self, x, u, i):

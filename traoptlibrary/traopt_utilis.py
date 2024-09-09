@@ -1,5 +1,6 @@
 import numpy as np
 import jax.numpy as jnp
+import jax.lax as lax
 from jax.numpy.linalg import norm
 from pyquaternion import Quaternion
 
@@ -68,7 +69,7 @@ def se3_vee(se3_mat):
     else:
         raise ValueError("Input must be a 4x4 np or jnp array representing an se(3) matrix")
 
-    
+
 def adjoint( xi ):
     """ Get the the adjoint matrix representation of Lie Algebra,
         i.e. the matrix representation of Lie bracket."""
@@ -101,6 +102,64 @@ def quat2rotm(quat):
     ])
     return R
 
+def rotm2quat(R: jnp.ndarray) -> jnp.ndarray:
+    """Creates a quaternion from a rotation matrix defining a given orientation.
+    
+    Parameters
+    ----------
+    R : [3x3] np.ndarray
+        Rotation matrix
+            
+    Returns
+    -------
+    q : [4x1] np.ndarray
+        quaternion defining the orientation    
+    """    
+    if R.shape != (3, 3):
+        raise ValueError("Input must be a 3x3 matrix")
+
+    u_q0 = jnp.sqrt(jnp.maximum(0, (1 + R[0, 0] + R[1, 1] + R[2, 2]) / 4))
+    u_q1 = jnp.sqrt(jnp.maximum(0, (1 + R[0, 0] - R[1, 1] - R[2, 2]) / 4))
+    u_q2 = jnp.sqrt(jnp.maximum(0, (1 - R[0, 0] + R[1, 1] - R[2, 2]) / 4))
+    u_q3 = jnp.sqrt(jnp.maximum(0, (1 - R[0, 0] - R[1, 1] + R[2, 2]) / 4))
+
+    q_candidates = jnp.array([u_q0, u_q1, u_q2, u_q3])
+    max_idx = jnp.argmax(q_candidates)  # Find the index of the maximum component
+
+    # Functions for each quaternion case based on max component
+    def q0_case(_):
+        q0 = u_q0
+        q1 = (R[2, 1] - R[1, 2]) / (4 * q0)
+        q2 = (R[0, 2] - R[2, 0]) / (4 * q0)
+        q3 = (R[1, 0] - R[0, 1]) / (4 * q0)
+        return jnp.array([q0, q1, q2, q3])
+
+    def q1_case(_):
+        q1 = u_q1
+        q0 = (R[2, 1] - R[1, 2]) / (4 * q1)
+        q2 = (R[0, 1] + R[1, 0]) / (4 * q1)
+        q3 = (R[0, 2] + R[2, 0]) / (4 * q1)
+        return jnp.array([q0, q1, q2, q3])
+
+    def q2_case(_):
+        q2 = u_q2
+        q0 = (R[0, 2] - R[2, 0]) / (4 * q2)
+        q1 = (R[0, 1] + R[1, 0]) / (4 * q2)
+        q3 = (R[1, 2] + R[2, 1]) / (4 * q2)
+        return jnp.array([q0, q1, q2, q3])
+
+    def q3_case(_):
+        q3 = u_q3
+        q0 = (R[1, 0] - R[0, 1]) / (4 * q3)
+        q1 = (R[0, 2] + R[2, 0]) / (4 * q3)
+        q2 = (R[1, 2] + R[2, 1]) / (4 * q3)
+        return jnp.array([q0, q1, q2, q3])
+
+    # Use lax.switch to select the appropriate case
+    q = lax.switch(max_idx, [q0_case, q1_case, q2_case, q3_case], operand=None)
+
+    return q
+
 def quatpos2SE3(x7):
     """ Converts a vector concatenated by quaternion 
         and position to SE(3) matrix. 
@@ -110,8 +169,12 @@ def quatpos2SE3(x7):
     """
     if x7.shape == (7,) or x7.shape == (7,1):
         x7 = x7.reshape((7,1))
+        # se3_matrix = jnp.block([
+        #     [ jnp.array(Quaternion(x7[:4, 0]).rotation_matrix), x7[4:].reshape(3, 1)],
+        #     [ jnp.zeros((1,3)), 1 ],
+        # ])
         se3_matrix = jnp.block([
-            [ jnp.array(Quaternion(x7[:4, 0]).rotation_matrix), x7[4:].reshape(3, 1)],
+            [ quat2rotm( x7[:4, 0] ), x7[4:].reshape(3, 1)],
             [ jnp.zeros((1,3)), 1 ],
         ])
         return se3_matrix
@@ -129,8 +192,9 @@ def SE32quatpos(m):
         # rot_matrix = m[:3, :3]
         # position = m[:3, 3]
         # quaternion = Quaternion(matrix=rot_matrix)
-        return np.concatenate((
-            Quaternion(matrix=m[:3, :3]).elements,
+        return jnp.concatenate((
+            # Quaternion(matrix=m[:3, :3]).elements,
+            rotm2quat(m[:3, :3]),
             m[:3, 3]
         )).reshape((7,1))
     else:

@@ -638,7 +638,12 @@ class iLQR_ErrorState(BaseController):
 
                     _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
                     if grad_wrt_input_norm < tol_grad_norm:
+
                         converged = True
+                        J_opt = J_new
+                        xs = xs_new
+                        us = us_new
+                        changed = True
                         accepted = True
                         break
 
@@ -691,18 +696,22 @@ class iLQR_ErrorState(BaseController):
             # TODO: not sure if reinitialization should be here 
             # or before converged checkpoint ??
             if accepted and (not self._tracking) :
-                print(f"Iteration {iteration} reference update")
+
+                end_time = time.perf_counter()
+                time_calc = end_time - start_time   
+                print(f"Iteration {iteration} reference update,  Used Time: {time_calc}")
+
                 new_X_ref, _ = self.dynamics.ref_reinitialize( xs )
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                print("Iteration", iteration, "Error-state dynamics reinitialization finished, Used Time:", time_calc )
+                print("Iteration", iteration, "dynamics reinitialization finished, Used Time:", time_calc )
 
                 _ = self.cost.ref_reinitialize( new_X_ref )
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                print("Iteration", iteration, "Error-state cost reinitialization finished, Used Time:", time_calc )
+                print("Iteration", iteration, "cost reinitialization finished, Used Time:", time_calc )
 
         # Store fit parameters.
         self._k = k
