@@ -569,12 +569,6 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
 
         self._N = X_ref.shape[0] - 1
 
-        # def update_phigoal(Xref, Xgoal):
-        #     return se3_vee(logm( 
-        #             jnp.linalg.inv(quatpos2SE3(Xref)) @ Xgoal
-        #     )).real
-        # self._vec_update_phigoal = jax.vmap( update_phigoal, in_axes=[0,None] )
-        
         def update_phigoal_onlyinv(Xref, Xgoal):
             # print(Xref.shape)
             return jnp.linalg.inv(quatpos2SE3(Xref)) @ Xgoal
@@ -590,16 +584,6 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
         self._vec_update_phigoal = vec_update_phigoal
 
         self._phi_goal = self._vec_update_phigoal( self._X_ref, self._X_goal )
-
-        # self._phi_goal = jnp.zeros(( self._N+1, self._error_state_size ))
-        # for i in range( self._N + 1 ):
-        #     self._phi_goal = self._phi_goal.at[i].set(
-        #         se3_vee(  
-        #             logm( jnp.linalg.inv(quatpos2SE3(self._X_ref[i])) @ self._X_goal)
-        #         ).real
-        #     )
-        
-        # print(f'_phi_goal: {self._phi_goal}, type: {type(self._phi_goal)}')
 
         self._Q = jnp.array(Q)
         self._R = jnp.array(R)
@@ -675,25 +659,7 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
     def ref_reinitialize( self, new_X_ref ) :
         """Re-initialize the error-state cost, with the new error-state rollout trajecotory."""
         self._X_ref = new_X_ref
-
-        # for i in range( self._N + 1 ):
-        #     self._phi_goal[i] = se3_vee(  
-        #         logm( jnp.linalg.inv(quatpos2SE3(self._X_ref[i])) @ self._X_goal)
-        #     ).real
-
-        # for i in range( self._N + 1 ):
-        #     self._phi_goal = self._phi_goal.at[i].set(
-        #         se3_vee(  
-        #             logm( jnp.linalg.inv(quatpos2SE3(self._X_ref[i])) @ self._X_goal)
-        #         ).real
-        #     )
-
         self._phi_goal = self._vec_update_phigoal( self._X_ref, self._X_goal )
-
-        # self._phi_goal = jnp.array(se3_vee(  
-        #     logm( jnp.linalg.inv(quatpos2SE3(new_X_ref[self._N])) @ self._X_goal)
-        # )).real
-
         return self._phi_goal
     
     def _l(self, x, u, i ):
