@@ -342,6 +342,26 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
 
         self._debug = debug
 
+        def update_Xref(X_ref, x):
+
+            # m = se3_hat(x[:6])
+            # c = 2.42
+            # squarings = jnp.maximum( 0, jnp.ceil(jnp.log2(jnp.linalg.norm(m, ord=1)) - c) )
+            # X_ref_new = SE32quatpos(
+            #     quatpos2SE3(X_ref) @ 
+            #     jnp.linalg.matrix_power(expm( m/(2**squarings)), 2**squarings)
+            # )
+            # return X_ref_new
+
+            X_ref_new = SE32quatpos( 
+                    quatpos2SE3(X_ref) @ expm( se3_hat(x[:6]) )
+            )
+            return X_ref_new
+        
+        # Use vmap to parallelize the update_ref function
+        # self._vec_update_Xref = jax.jit(jax.vmap(update_Xref,in_axes=[0,0]))
+        self._vec_update_Xref = jax.jit(jax.vmap(update_Xref))
+
         super(ErrorStateSE3AutoDiffDynamics, self).__init__()
 
     @property
@@ -450,30 +470,10 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         """Re-initialize the error-state dynamics, 
         with the new error-state rollout trajectory in a parallel style."""
         
-        def update_Xref(X_ref, x):
-
-            # m = se3_hat(x[:6])
-            # c = 2.42
-            # squarings = jnp.maximum( 0, jnp.ceil(jnp.log2(jnp.linalg.norm(m, ord=1)) - c) )
-            # X_ref_new = SE32quatpos(
-            #     quatpos2SE3(X_ref) @ 
-            #     jnp.linalg.matrix_power(expm( m/(2**squarings)), 2**squarings)
-            # )
-            # return X_ref_new
-
-            X_ref_new = SE32quatpos( 
-                    quatpos2SE3(X_ref) @ expm( se3_hat(x[:6]) )
-            )
-            return X_ref_new
-
-        # Use vmap to parallelize the update_ref function
-        vec_update_fn = jax.vmap(update_Xref)
-        vec_update_fn = jax.jit(vec_update_fn)
-
         # print(f"X_ref has type: {type(self._X_ref)}")
         # print(f"xi_ref has type: {type(self._xi_ref)}")
 
-        self._X_ref= vec_update_fn(self._X_ref, xs)
+        self._X_ref= self._vec_update_Xref(self._X_ref, xs)
 
         for i in range(self.N + 1):
             self._xi_ref = self._xi_ref.at[i].set(

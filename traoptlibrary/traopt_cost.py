@@ -1,5 +1,6 @@
 import abc
 import numpy as np
+import jax
 import jax.numpy as jnp
 from jax import jacfwd, hessian, jit
 from traoptlibrary.traopt_utilis import adjoint, quatpos2SE3, se3_vee, se3_hat
@@ -562,13 +563,43 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
 
         self._X_ref = jnp.array(X_ref)
         self._X_goal = jnp.array(X_goal)
+        print(f"The goal configuration is {self._X_goal}")
+
         # self._X_goal_inv = np.linalg.inv( X_goal )
 
         self._N = X_ref.shape[0] - 1
-        self._phi_goal = jnp.array(se3_vee(  
-            logm( jnp.linalg.inv(quatpos2SE3(X_ref[self._N])) @ self._X_goal)
-        )).real
-        print(f'_phi_goal: {self._phi_goal}, type: {type(self._phi_goal)}')
+
+        # def update_phigoal(Xref, Xgoal):
+        #     return se3_vee(logm( 
+        #             jnp.linalg.inv(quatpos2SE3(Xref)) @ Xgoal
+        #     )).real
+        # self._vec_update_phigoal = jax.vmap( update_phigoal, in_axes=[0,None] )
+        
+        def update_phigoal_onlyinv(Xref, Xgoal):
+            # print(Xref.shape)
+            return jnp.linalg.inv(quatpos2SE3(Xref)) @ Xgoal
+        self._vec_update_phigoal_onlyinv = jax.jit(
+            jax.vmap(update_phigoal_onlyinv, in_axes=[0,None])
+        )
+
+        def vec_update_phigoal(Xref, Xgoal):
+            se3_batch = self._vec_update_phigoal_onlyinv(Xref, Xgoal)
+            # se3_batch = [ jnp.linalg.inv(quatpos2SE3(mat)) @ Xgoal for mat in Xref ]
+            phi_goal_new = [se3_vee(logm(np.array(mat))) for mat in se3_batch]
+            return jnp.array(phi_goal_new)
+        self._vec_update_phigoal = vec_update_phigoal
+
+        self._phi_goal = self._vec_update_phigoal( self._X_ref, self._X_goal )
+
+        # self._phi_goal = jnp.zeros(( self._N+1, self._error_state_size ))
+        # for i in range( self._N + 1 ):
+        #     self._phi_goal = self._phi_goal.at[i].set(
+        #         se3_vee(  
+        #             logm( jnp.linalg.inv(quatpos2SE3(self._X_ref[i])) @ self._X_goal)
+        #         ).real
+        #     )
+        
+        # print(f'_phi_goal: {self._phi_goal}, type: {type(self._phi_goal)}')
 
         self._Q = jnp.array(Q)
         self._R = jnp.array(R)
@@ -644,9 +675,24 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
     def ref_reinitialize( self, new_X_ref ) :
         """Re-initialize the error-state cost, with the new error-state rollout trajecotory."""
         self._X_ref = new_X_ref
-        self._phi_goal = jnp.array(se3_vee(  
-            logm( jnp.linalg.inv(quatpos2SE3(new_X_ref[self._N])) @ self._X_goal)
-        )).real
+
+        # for i in range( self._N + 1 ):
+        #     self._phi_goal[i] = se3_vee(  
+        #         logm( jnp.linalg.inv(quatpos2SE3(self._X_ref[i])) @ self._X_goal)
+        #     ).real
+
+        # for i in range( self._N + 1 ):
+        #     self._phi_goal = self._phi_goal.at[i].set(
+        #         se3_vee(  
+        #             logm( jnp.linalg.inv(quatpos2SE3(self._X_ref[i])) @ self._X_goal)
+        #         ).real
+        #     )
+
+        self._phi_goal = self._vec_update_phigoal( self._X_ref, self._X_goal )
+
+        # self._phi_goal = jnp.array(se3_vee(  
+        #     logm( jnp.linalg.inv(quatpos2SE3(new_X_ref[self._N])) @ self._X_goal)
+        # )).real
 
         return self._phi_goal
     
@@ -668,7 +714,7 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
         # yt = logm( self.q_goal_inv @ quatpos2SE3( self.X_ref(i) ) @ expm(x_err) )
         # yt =  se3_vee( logm(  self.q_goal_inv @ expm( se3_hat(x_err) )))
 
-        yt = x_err - self._phi_goal.reshape((self.error_state_size,1))
+        yt = x_err - self._phi_goal[i].reshape((self.error_state_size,1))
 
         # print(f'yt: {yt}, u: {u}')
         cost_value = (yt.T @ self.Q @ yt + u.T @ self.R @ u)
@@ -692,7 +738,7 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
         # yt = logm( self.q_goal_inv @ quatpos2SE3( self.X_ref(i) ) @ expm(x_err) )
         # yt =  se3_vee( self.q_goal_inv @ expm( se3_hat(x_err) )  )
 
-        yt = x_err - self._phi_goal
+        yt = x_err - self._phi_goal[i].reshape((self.error_state_size,1))
         
         return (yt.T @ self.P @ yt).reshape(-1)[0]
 
