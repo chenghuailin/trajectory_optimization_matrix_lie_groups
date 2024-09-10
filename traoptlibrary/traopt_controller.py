@@ -1,6 +1,7 @@
 import abc
 import warnings
 import numpy as np
+import jax.numpy as jnp
 import time
 from traoptlibrary.traopt_utilis import is_pos_def
 
@@ -636,6 +637,7 @@ class iLQR_ErrorState(BaseController):
                     xs_new, us_new = self._control(xs, us, k, K, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
 
+                    # grad_wrt_input_norm = 0.
                     _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
                     if grad_wrt_input_norm < tol_grad_norm:
 
@@ -686,20 +688,13 @@ class iLQR_ErrorState(BaseController):
                     warnings.warn("exceeded max regularization term")
                     break
 
-            if on_iteration:
-                on_iteration(iteration, xs, us, J_opt, accepted, converged, grad_wrt_input_norm,
-                             alpha, self._mu, J_hist, xs_hist, us_hist)
-
-            if converged:
-                break
-
             # TODO: not sure if reinitialization should be here 
-            # or before converged checkpoint ??
+            # or after converged checkpoint ??
             if accepted and (not self._tracking) :
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                print(f"Iteration {iteration} reference update,  Used Time: {time_calc}")
+                print(f"Iteration {iteration} start reference update,  Used Time: {time_calc}")
 
                 new_X_ref, _ = self.dynamics.ref_reinitialize( xs )
 
@@ -713,13 +708,25 @@ class iLQR_ErrorState(BaseController):
                 time_calc = end_time - start_time   
                 print("Iteration", iteration, "cost reinitialization finished, Used Time:", time_calc )
 
+            if on_iteration:
+                on_iteration(iteration, xs, us, J_opt, self.dynamics._X_ref,
+                             accepted, converged, grad_wrt_input_norm,
+                             alpha, self._mu, 
+                             J_hist, xs_hist, us_hist, Xref_hist)
+
+            if converged:
+                break
+
         # Store fit parameters.
         self._k = k
         self._K = K
         self._nominal_xs = xs
         self._nominal_us = us
 
-        return xs, us, J_hist, xs_hist, us_hist
+        if self._tracking:
+            return xs, us, J_hist, jnp.array(xs_hist), us_hist
+        else:
+            return xs, us, J_hist, jnp.array(xs_hist), us_hist, jnp.array(Xref_hist)
 
     def _control(self, xs, us, k, K, alpha=1.0):
         """Applies the controls for a given trajectory.

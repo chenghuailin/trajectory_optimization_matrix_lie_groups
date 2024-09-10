@@ -210,3 +210,46 @@ def is_pos_def(A):
             return False
     else:
         return False
+    
+def euler2quat(eulerAngles:jnp.ndarray|list)->jnp.ndarray:
+    """
+    Convert an Euler angle to a quaternion.
+    
+    We have used the following definition of Euler angles.
+
+    - Tait-Bryan variant of Euler Angles
+    - Yaw-pitch-roll rotation order (ZYX convention), rotating around the z, y and x axes respectively
+    - Intrinsic rotation (the axes move with each rotation)
+    - Active (otherwise known as alibi) rotation (the point is rotated, not the coordinate system)
+    - Right-handed coordinate system with right-handed rotations
+    
+    Parameters
+    ----------
+    eulerAngles : 
+        [3x1] jnp.ndarray  
+        [roll, pitch, yaw] angles in radians 
+            
+    Returns
+    -------
+    p : [4x1] jnp.ndarray
+        quaternion defining a given orientation
+  """
+    if isinstance(eulerAngles, list) and len(eulerAngles)==3:
+        eulerAngles = np.array(eulerAngles) 
+    elif isinstance(eulerAngles, (jnp.ndarray, np.ndarray)) and eulerAngles.size==3:
+        pass
+    else:
+        raise TypeError("The eulerAngles must be given as [3x1] np.ndarray vector or a python list of 3 elements")
+    
+    roll = eulerAngles[0]
+    pitch = eulerAngles[1]
+    yaw = eulerAngles[2]
+    
+    q0 = jnp.cos(roll/2) * jnp.cos(pitch/2) * jnp.cos(yaw/2) + jnp.sin(roll/2) * jnp.sin(pitch/2) * jnp.sin(yaw/2)
+    q1 = jnp.sin(roll/2) * jnp.cos(pitch/2) * jnp.cos(yaw/2) - jnp.cos(roll/2) * jnp.sin(pitch/2) * jnp.sin(yaw/2)
+    q2 = jnp.cos(roll/2) * jnp.sin(pitch/2) * jnp.cos(yaw/2) + jnp.sin(roll/2) * jnp.cos(pitch/2) * jnp.sin(yaw/2)
+    q3 = jnp.cos(roll/2) * jnp.cos(pitch/2) * jnp.sin(yaw/2) - jnp.sin(roll/2) * jnp.sin(pitch/2) * jnp.cos(yaw/2)
+    
+    p = jnp.r_[q0, q1, q2, q3]
+    
+    return p

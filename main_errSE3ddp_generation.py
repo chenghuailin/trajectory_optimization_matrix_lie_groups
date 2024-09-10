@@ -6,16 +6,21 @@ from jax import random
 from traoptlibrary.traopt_dynamics import ErrorStateSE3AutoDiffDynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, AutoDiffCost
 from traoptlibrary.traopt_cost import ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost
-from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3
+from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3, euler2quat, quat2rotm
 from scipy.linalg import expm, logm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.colors import Normalize
 
-def on_iteration(iteration_count, xs, us, J_opt, accepted, converged,grad_wrt_input_norm,
-                  alpha, mu, J_hist, xs_hist, us_hist):
+def on_iteration(iteration_count, xs, us, J_opt, Xref,
+                accepted, converged, grad_wrt_input_norm,
+                alpha, mu, J_hist, 
+                xs_hist, us_hist, Xref_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
+    Xref_hist.append(Xref.copy())
     info = "converged" if converged else ("accepted" if accepted else "failed")
     # final_state = xs[-1]
     # print("iteration", iteration_count, info, J_opt, "\n", final_state, "\n", alpha, mu)
@@ -26,7 +31,7 @@ key = random.key(seed)
 jax.config.update("jax_enable_x64", True)
 
 dt = 0.01
-Nsim = 1400   # Simulation horizon
+Nsim = 400   # Simulation horizon
 
 # ====================
 # Inertia Matrix
@@ -39,16 +44,20 @@ J = np.block([
     [np.zeros((3, 3)), m * np.identity(3)]
 ])
 
-# ====================
-# Goal For Generation
-# ====================
+# ========================================
+# Goal Configuration For Trajecotory Generation
+# ========================================
 
-quat_goal = np.array([ 1., 0., 0., 0. ])
+# [roll, pitch, yaw] angles in radians, 
+# Yaw-pitch-roll rotation order (ZYX convention)
+euler_goal = [0.,  0., jnp.pi / 4]
+quat_goal = euler2quat(euler_goal) 
+
 pos_goal = np.array([ 10., 10., 10. ])
 q_goal = quatpos2SE3( np.concatenate((quat_goal, pos_goal)) )
 
 # =====================================================
-# Reference Generation
+# Nominal Reference Generation
 # =====================================================
 
 q0_ref = np.array([1, 0, 0, 0])
@@ -57,8 +66,12 @@ p0_ref = np.array([0, 0, 0])
 # w0_ref = np.array([0, 0, 1]) * 1
 # v0_ref = np.array([1, 0, 0.1]) * 2
 
-w0_ref = np.array([0, 0, 0]) * 1
-v0_ref = pos_goal / (Nsim * dt)
+euler_devia = np.array([np.pi/4,np.pi/4,np.pi/4])
+w0_ref = ( euler_goal + euler_devia )  / (Nsim * dt)
+# w0_ref = np.array([0, 0, 0]) * 1
+
+pos_devia = np.array([1,1,-1])
+v0_ref = (pos_goal + pos_devia) / (Nsim * dt)
 
 x0_ref = np.concatenate((q0_ref, p0_ref))
 X0_ref = np.block([
@@ -128,78 +141,23 @@ dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS
 # Cost Instantiation
 # =====================================================
 
-# ------------- A. Second order cost as Sangli's paper ----------------
-# This cost penalizes both error deviation and velocity of error (both on Lie algebra)
-# (The same as the Sangli's paper)
-
 # Q = np.diag([ 
 #     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1. 
 # ])
 # P = np.diag([
 #     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1.  
 # ]) * 10
 # R = np.identity(6) * 1e-5
 
-# cost = ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost( Q, R, P, xi_ref )
-
-# ------------- B. First order cost penalty  ------------- 
-# This cost only penalize the Lie algebra element of the error state, so only first order
-
-# def l(x,u,i):
-#     R = np.identity(6) * 1e-5
-#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
-#                              0., 0., 0., 0., 0., 0. ]) )
-
-#     return u.T @ R @ u + x.T @ Q @ x
-
-# def l_terminal(x,i):
-#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
-#                              0., 0., 0., 0., 0., 0. ]) ) * 10
-    
-#     return x.T @ Q @ x
-
-# cost = AutoDiffCost( l, l_terminal, state_size, action_size )
-
-# ------------- C. Full error-state penalty  ------------- 
-# This penalize the error state deviation, and the velocity of configuration
-# 
-# Doesn't really work, cuz the reference configuration has velocity itself, 
-# which shouldn't be penalized if to track the reference
-
-# def l(x,u,i):
-#     R = np.identity(6) * 1e-5
-#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
-#                              1., 1., 1., 1., 1., 1. ]) )
-
-#     return u.T @ R @ u + x.T @ Q @ x
-
-# def l_terminal(x,i):
-#     Q = jnp.diag( jnp.array([10., 10., 10., 1., 1., 1.,
-#                              1., 1., 1., 1., 1., 1. ]) ) * 10
-    
-#     return x.T @ Q @ x
-
-# cost = AutoDiffCost( l, l_terminal, state_size, action_size )
-
-# ------------- D. Trajecotry Generation Cost 1st Order  ------------- 
-
 Q = np.diag([ 
-    10., 10., 10., 1., 1., 1.,
+    10., 10., 10., 5., 5., 5.,
 ])
 P = np.diag([
-    10., 10., 10., 1., 1., 1.,
+    10., 10., 10., 5., 5., 5.,
 ]) * 10
-R = np.identity(6) * 1e-5
+R = np.identity(6) * 1e-2
 
-# quat_goal = np.array([ 1., 0., 0., 0. ])
-# pos_goal = np.array([ 10., 10., 10. ])
-# q_goal = quatpos2SE3( np.concatenate((quat_goal, pos_goal)) )
-# print(q_goal)
-
-cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P,X_ref, q_goal)
-
+cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goal)
 
 # =====================================================
 # Solver Instantiation
@@ -223,12 +181,11 @@ x0 = jnp.array(x0)
 
 us_init = np.zeros((N, action_size,))
 
-# ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
 ilqr = iLQR_ErrorState(dynamics, cost, N, 
                        hessians=HESSIANS, tracking=False)
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
-        ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, Xref_hist_ilqr = \
+        ilqr.fit(x0, us_init, n_iterations=200, tol_J=1e-8, on_iteration=on_iteration)
 
 
 # =====================================================
@@ -266,7 +223,7 @@ plt.grid()
 
 
 # =====================================================
-# Visualization with Vector
+# Final Result Visualization with Vector
 # =====================================================
 
 interval_plot = int((Nsim + 1) / 40)
@@ -278,15 +235,20 @@ ax1 = fig1.add_subplot(111, projection='3d')
 
 # Define an initial vector and plot on figure
 initial_vector = np.array([1, 0, 0])  # Example initial vector
-ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+           color='g', label='Initial Vector')
+goal_vector = quat2rotm( quat_goal ) @ initial_vector
+ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+           goal_vector[0], goal_vector[1], goal_vector[2], 
+           color='y', label='Goal Vector')
+
 
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, interval_plot):  
 
-    # =========== 1. Plot the reference trajectory ===========
+    # =========== 1. Plot the first nominal trajectory ===========
 
-    quat = Quaternion(X_ref[i, :4, 0])  # Extract the quaternion from the X_ref data
-    rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
+    rot_matrix = quat2rotm(X_ref[i, :4, 0])  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
     # Extract the position 
@@ -295,16 +257,24 @@ for i in range(0, Nsim + 1, interval_plot):
     # Plot the rotated vector
     ax1.quiver(position[0], position[1], position[2],
               rotated_vector[0], rotated_vector[1], rotated_vector[2],
-              color='b', length=1, label='Reference Configuration' if i == 0 else '')
+              color='b', length=1, label='Initial Nominal Reference' if i == 0 else '')
     
-    # =========== 2. Plot the simulated error-state configuration trajectory ===========
+    # =========== 2. Plot the final nominal trajectory ===========
 
-    # se3_matrix = np.block([
-    #     [Quaternion(X_ref[i, :4, 0]).rotation_matrix, X_ref[i, 4:].reshape(3, 1)],
-    #     [ np.zeros((1,3)), 1 ],
-    # ]) @ expm( se3_hat( xs_ilqr[i, :6]) )
+    rot_matrix = quat2rotm(Xref_hist_ilqr[-1, i, :4, 0])  # Extract the quaternion from the X_ref data
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    
+    # Extract the position 
+    position = Xref_hist_ilqr[-1, i, 4:, 0]
 
-    se3_matrix = quatpos2SE3( X_ref[i] ) @ expm( se3_hat( xs_ilqr[i, :6]) )
+    # Plot the rotated vector
+    ax1.quiver(position[0], position[1], position[2],
+              rotated_vector[0], rotated_vector[1], rotated_vector[2],
+              color='m', length=1, label='Final Nominal Reference' if i == 0 else '')
+    
+    # =========== 3. Plot the simulated error-state configuration trajectory ===========
+
+    se3_matrix = quatpos2SE3( Xref_hist_ilqr[-1, i, :, 0] ) @ expm( se3_hat( xs_ilqr[i, :6]) )
     
     rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
@@ -327,6 +297,111 @@ ax1.set_xlabel('X')
 ax1.set_ylabel('Y')
 ax1.set_zlabel('Z')
 
+# =====================================================
+# Nominal Reference Evolution Visualization with Vector
+# =====================================================
+
+fig1 = plt.figure(4)
+ax1 = fig1.add_subplot(111, projection='3d')
+
+interval_plot = int((Nsim + 1) / 30)
+lim = 15
+
+# Define an initial vector and plot on figure
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+           color='g', label='Initial Vector')
+goal_vector = quat2rotm( quat_goal ) @ initial_vector
+ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+           goal_vector[0], goal_vector[1], goal_vector[2], 
+           color='r', label='Goal Vector')
+
+# Normalize to create a color map for Xref curves
+norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0])  # Normalize for the number of curves
+cmap = plt.colormaps['viridis']  # Choose a colormap (viridis is a good gradient colormap)
+
+# Loop through quaternion data to plot rotated vectors
+for i in range( Xref_hist_ilqr.shape[0] ):
+    color = cmap(norm(i)) 
+    for j in range(0, Nsim + 1, interval_plot):  
+        quat = Quaternion(Xref_hist_ilqr[i, j, :4, 0])  # Extract the quaternion from the X_ref data
+        rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
+        rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+        
+        # Extract the position 
+        position = Xref_hist_ilqr[i, j, 4:, 0]
+
+        # Plot the rotated vector
+        ax1.quiver(position[0], position[1], position[2],
+                rotated_vector[0], rotated_vector[1], rotated_vector[2],
+                color=color, length=1, label='Nominal Trajectory '+str(i) if j == 0 else '')
+    
+
+# Set the limits for the axes
+
+ax1.set_title('Nominal Trajectory Revolution')
+ax1.set_xlim([-lim, lim]) 
+ax1.set_ylim([-lim, lim])
+ax1.set_zlim([-lim, lim])
+ax1.legend()
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('Z')
+
+
+# =====================================================
+# Configuration Trajectory Evolution Visualization with Vector
+# =====================================================
+
+fig1 = plt.figure(5)
+ax1 = fig1.add_subplot(111, projection='3d')
+
+interval_plot = int((Nsim + 1) / 40)
+lim = 15
+
+# Define an initial vector and plot on figure
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+           color='g', label='Initial Vector')
+goal_vector = quat2rotm( quat_goal ) @ initial_vector
+ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+           goal_vector[0], goal_vector[1], goal_vector[2], 
+           color='r', label='Goal Vector')
+
+# Normalize to create a color map for Xref curves
+norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0])  # Normalize for the number of curves
+cmap = plt.colormaps['viridis'] # Choose a colormap (viridis is a good gradient colormap)
+
+# Loop through quaternion data to plot rotated vectors
+for i in range( Xref_hist_ilqr.shape[0] ):
+    color = cmap(norm(i)) 
+    for j in range(0, Nsim + 1, interval_plot):  
+
+        se3_matrix = quatpos2SE3( Xref_hist_ilqr[i, j, :, 0] ) @ expm( se3_hat( xs_ilqr[i, :6]) )
+
+        rot_matrix = se3_matrix[:3,:3]
+        rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+        
+        # Extract the position 
+        position = se3_matrix[3, :3]
+
+        # Plot the rotated vector
+        ax1.quiver(position[0], position[1], position[2],
+                rotated_vector[0], rotated_vector[1], rotated_vector[2],
+                color=color, length=1, label='Configuration Trajectory '+str(i) if j == 0 else '')
+    
+
+# Set the limits for the axes
+
+ax2.set_title('Nominal Trajectory Revolution')
+
+ax1.set_xlim([-lim, lim]) 
+ax1.set_ylim([-lim, lim])
+ax1.set_zlim([-lim, lim])
+ax1.legend()
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('Z')
 
 # # =====================================================
 # # Plotting
