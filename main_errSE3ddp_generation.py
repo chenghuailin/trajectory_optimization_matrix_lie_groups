@@ -1,4 +1,4 @@
-from traoptlibrary.traopt_controller import iLQR, iLQR_ErrorState
+from traoptlibrary.traopt_controller import iLQR, iLQR_ErrorState_LinearRollout
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -24,7 +24,8 @@ def on_iteration(iteration_count, xs, us, J_opt, Xref,
     info = "converged" if converged else ("accepted" if accepted else "failed")
     # final_state = xs[-1]
     # print("iteration", iteration_count, info, J_opt, "\n", final_state, "\n", alpha, mu)
-    print("Iteration", iteration_count, info, J_opt, grad_wrt_input_norm, alpha, mu)
+    # print("Iteration", iteration_count, info, J_opt, grad_wrt_input_norm, alpha, mu)
+    print(f"Iteration:{iteration_count}, {info}, cost:{J_opt}, alpha:{alpha}, mu:{mu}")
 
 seed = 24234156
 key = random.key(seed)
@@ -63,12 +64,8 @@ q_goal = quatpos2SE3( np.concatenate((quat_goal, pos_goal)) )
 q0_ref = np.array([1, 0, 0, 0])
 p0_ref = np.array([0, 0, 0])
 
-# w0_ref = np.array([0, 0, 1]) * 1
-# v0_ref = np.array([1, 0, 0.1]) * 2
-
 euler_devia = np.array([np.pi/4,np.pi/4,np.pi/4])
 w0_ref = ( euler_goal + euler_devia )  / (Nsim * dt)
-# w0_ref = np.array([0, 0, 0]) * 1
 
 pos_devia = np.array([1,1,-1])
 v0_ref = (pos_goal + pos_devia) / (Nsim * dt)
@@ -142,20 +139,14 @@ dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS
 # =====================================================
 
 # Q = np.diag([ 
-#     10., 10., 10., 1., 1., 1.,
-# ])
+#     10., 10., 10., 5., 5., 5.,
+# ]) * 1e2 
 # P = np.diag([
-#     10., 10., 10., 1., 1., 1.,
+#     10., 10., 10., 5., 5., 5.,
 # ]) * 10
-# R = np.identity(6) * 1e-5
-
-Q = np.diag([ 
-    10., 10., 10., 5., 5., 5.,
-])
-P = np.diag([
-    10., 10., 10., 5., 5., 5.,
-]) * 10
-R = np.identity(6) * 1e-2
+Q = np.identity(6) * 1
+P = np.identity(6) * 1e5
+R = np.identity(6) * 1e1
 
 cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goal)
 
@@ -165,23 +156,24 @@ cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goa
 
 # Intial State
 
-q0 = np.array([1., 0., 0., 0.])
-p0 = np.array([-1., -1., 0.2])
-# w0 = np.array([0, 0, 1]) * 1
-# v0 = np.array([1, 0, 0.1]) * 2
-w0 = np.array([0., 0., 0.]) 
-v0 = np.array([0., 0.5, 0.])
+q0 = q0_ref
+p0 = p0_ref
+# p0 = np.array([-1., -1., 0.2])
+w0 = w0_ref
+# w0 = np.array([0., 0., 0.]) 
+v0 = v0_ref
+
 X0 = np.block([
     [ Quaternion(q0).rotation_matrix, p0.reshape(-1,1) ],
     [ np.zeros((1,3)),1 ],
 ])
 x0 = np.concatenate(( se3_vee(logm( np.linalg.inv(X0_ref) @ X0 )), w0, v0))
-print(x0)
+print(f"Initial state is {x0}")
 x0 = jnp.array(x0)
 
 us_init = np.zeros((N, action_size,))
 
-ilqr = iLQR_ErrorState(dynamics, cost, N, 
+ilqr = iLQR_ErrorState_LinearRollout(dynamics, cost, N, 
                        hessians=HESSIANS, tracking=False)
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, Xref_hist_ilqr = \
@@ -317,8 +309,8 @@ ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2],
            color='r', label='Goal Vector')
 
 # Normalize to create a color map for Xref curves
-norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0])  # Normalize for the number of curves
-cmap = plt.colormaps['viridis']  # Choose a colormap (viridis is a good gradient colormap)
+norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
+cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
 
 # Loop through quaternion data to plot rotated vectors
 for i in range( Xref_hist_ilqr.shape[0] ):
@@ -334,7 +326,7 @@ for i in range( Xref_hist_ilqr.shape[0] ):
         # Plot the rotated vector
         ax1.quiver(position[0], position[1], position[2],
                 rotated_vector[0], rotated_vector[1], rotated_vector[2],
-                color=color, length=1, label='Nominal Trajectory '+str(i) if j == 0 else '')
+                color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
     
 
 # Set the limits for the axes
@@ -369,31 +361,31 @@ ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2],
            color='r', label='Goal Vector')
 
 # Normalize to create a color map for Xref curves
-norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0])  # Normalize for the number of curves
-cmap = plt.colormaps['viridis'] # Choose a colormap (viridis is a good gradient colormap)
+norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
+cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
 
 # Loop through quaternion data to plot rotated vectors
-for i in range( Xref_hist_ilqr.shape[0] ):
+for i in range( Xref_hist_ilqr.shape[0]-1 ):
     color = cmap(norm(i)) 
     for j in range(0, Nsim + 1, interval_plot):  
 
-        se3_matrix = quatpos2SE3( Xref_hist_ilqr[i, j, :, 0] ) @ expm( se3_hat( xs_ilqr[i, :6]) )
+        se3_matrix = quatpos2SE3( Xref_hist_ilqr[i, j, :, 0] ) @ expm( se3_hat( xs_hist_ilqr[i+1, j, :6]) )
 
         rot_matrix = se3_matrix[:3,:3]
         rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
         
         # Extract the position 
-        position = se3_matrix[3, :3]
+        position = se3_matrix[:3, 3]
 
         # Plot the rotated vector
         ax1.quiver(position[0], position[1], position[2],
                 rotated_vector[0], rotated_vector[1], rotated_vector[2],
-                color=color, length=1, label='Configuration Trajectory '+str(i) if j == 0 else '')
+                color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
     
 
 # Set the limits for the axes
 
-ax2.set_title('Nominal Trajectory Revolution')
+ax1.set_title('Configuration Trajectory Revolution')
 
 ax1.set_xlim([-lim, lim]) 
 ax1.set_ylim([-lim, lim])

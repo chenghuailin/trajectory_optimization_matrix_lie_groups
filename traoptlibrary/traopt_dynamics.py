@@ -316,7 +316,8 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         self._Bt = jnp.empty((self._state_size,self._action_size))
         
         if X_ref.shape[0] != xi_ref.shape[0]:
-            raise ValueError("Group reference X and velocity reference should share the same time horizon")
+            raise ValueError("Group reference X and velocity reference \
+                            should share the same time horizon")
         self._N = X_ref.shape[0] - 1
         self._dt = dt
 
@@ -324,10 +325,8 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         self.integration_method = integration_method
         if integration_method == "euler":
             self._f = jit(self.fd_euler)
-            # self._f = self.fd_euler
         elif integration_method == "rk4":
             self._f = jit(self.fd_rk4)
-            # self._f = self.fd_rk4
         else:
             raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
         
@@ -343,23 +342,12 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         self._debug = debug
 
         def update_Xref(X_ref, x):
-
-            # m = se3_hat(x[:6])
-            # c = 2.42
-            # squarings = jnp.maximum( 0, jnp.ceil(jnp.log2(jnp.linalg.norm(m, ord=1)) - c) )
-            # X_ref_new = SE32quatpos(
-            #     quatpos2SE3(X_ref) @ 
-            #     jnp.linalg.matrix_power(expm( m/(2**squarings)), 2**squarings)
-            # )
-            # return X_ref_new
-
             X_ref_new = SE32quatpos( 
                     quatpos2SE3(X_ref) @ expm( se3_hat(x[:6]) )
             )
             return X_ref_new
         
         # Use vmap to parallelize the update_ref function
-        # self._vec_update_Xref = jax.jit(jax.vmap(update_Xref,in_axes=[0,0]))
         self._vec_update_Xref = jax.jit(jax.vmap(update_Xref))
 
         super(ErrorStateSE3AutoDiffDynamics, self).__init__()

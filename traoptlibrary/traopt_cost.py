@@ -563,7 +563,7 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
 
         self._X_ref = jnp.array(X_ref)
         self._X_goal = jnp.array(X_goal)
-        print(f"The goal configuration is {self._X_goal}")
+        print(f"The goal configuration is \n{self._X_goal}")
 
         # self._X_goal_inv = np.linalg.inv( X_goal )
 
@@ -589,7 +589,7 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
         self._R = jnp.array(R)
         self._P = jnp.array(P)
 
-        self._l = jit(self._l)
+        # self._l = jit(self._l)
 
         self._l_x = jit(jacfwd(self._l))
         self._l_u = jit(jacfwd(self._l, argnums=1))
@@ -601,7 +601,7 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
         # Terminal cost only depends on x, so we only need to evaluate the x
         # partial derivatives.
 
-        self._l_terminal = jit(self._l_terminal)
+        # self._l_terminal = jit(self._l_terminal)
         self._l_x_terminal = jit(jacfwd(self._l_terminal))
         self._l_xx_terminal = jit(hessian(self._l_terminal))
 
