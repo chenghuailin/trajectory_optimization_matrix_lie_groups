@@ -268,9 +268,9 @@ class AutoDiffDynamics(BaseDynamics):
         return self._f_uu(x,u,i)
     
 
-class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
+class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
 
-    """Error-State SE(3) Dynamics Model implemented with Jax for Derivatvies"""
+    """Error-State SE(3) Dynamics Model implemented with Jax"""
 
     def __init__(self, J, X_ref, xi_ref, dt, integration_method="euler",
                     state_size=(6,6), action_size=6, 
@@ -350,7 +350,7 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
         # Use vmap to parallelize the update_ref function
         self._vec_update_Xref = jax.jit(jax.vmap(update_Xref))
 
-        super(ErrorStateSE3AutoDiffDynamics, self).__init__()
+        super(ErrorStateSE3LinearRolloutAutoDiffDynamics, self).__init__()
 
     @property
     def state_size(self):
@@ -651,3 +651,465 @@ class ErrorStateSE3AutoDiffDynamics(BaseDynamics):
 
         return self._f_uu(x,u,i)
     
+
+class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
+
+    """Error-State SE(3) Dynamics Model implemented with Jax"""
+
+    def __init__(self, J, u0, q0, xi0, dt, 
+                errstate_integration="euler", rollout_integration ="euler",
+                state_size=(6,6), action_size=6, 
+                hessians=False, debug = None, **kwargs):
+        """Constructs an Dynamics model for SE(3).
+
+        Args:
+            J: Inertia matrix, diag(I_b, m * I_3), 
+                m : body mass,
+                I_b : moment of inertia in the body frame.
+            u0: Initial input sequence, (N, actiion size)
+            q0: Initial configuration, SE(3), (4,4).
+            xi0: Initial velocity, (velocity_state_size,).
+            dt: Sampling time.
+            errstate_integration: integration method for dynamics,
+                note this is for the error-state linear dynamics,
+                "euler": euler method,
+                "rk4": Runga Kutta 4 method.
+            rollout_integration: integration method for rollout,
+                "euler": euler method,
+                "rk4": Runga Kutta 4 method.
+            state_size: Tuple of State variable dimension, 
+                ( error state size, velocity state size ).
+            action_size: Input variable dimension.
+            hessians: Evaluate the dynamic model's second order derivatives.
+                Default: only use first order derivatives. (i.e. iLQR instead
+                of DDP).
+            debug: Debug mode or not.
+            **kwargs: Additional keyword-arguments to pass to any potential 
+                function, e.g. in the preivious version `theano.function()`.
+        """
+
+        self._state_size = state_size[0] + state_size[1]
+        self._error_state_size = state_size[0] 
+        self._vel_state_size = state_size[1] 
+        self._action_size = action_size
+
+        self._q_ref, self._xi_ref = self.rollout_nominal_with_input( q0, xi0, u0 )
+
+        self._Ib = J[0:3, 0:3] 
+        self._m = J[4,4]
+        self._J = J
+        self._Jinv = jnp.linalg.inv(J)
+
+        self._At = jnp.empty((self._state_size,self._state_size))
+        self._Bt = jnp.empty((self._state_size,self._action_size))
+        
+        self._N = u0.shape[0] - 1
+        self._dt = dt
+
+        self.errstate_integration = errstate_integration
+        if self.errstate_integration == "euler":
+            self._f = jit(self._fd_euler_fc_errstate)
+        elif self.errstate_integration == "rk4":
+            self._f = jit(self._fd_rk4_fc_errstate)
+        else:
+            raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
+        
+        self.rollout_integration = rollout_integration
+        if not (self.errstate_integration == "euler" or self.errstate_integration == "rk4"):
+            raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
+        
+        self._f_x = jit(jacfwd(self._f))
+        self._f_u = jit(jacfwd(self._f, argnums=1))
+
+        self._has_hessians = hessians
+        if hessians:
+            self._f_xx = jit(hessian(self._f, argnums=0))
+            self._f_ux = jit(jacfwd( jacfwd(self._f, argnums=1) ))
+            self._f_uu = jit(hessian(self._f, argnums=1))
+
+        self._debug = debug
+
+        def err2config(q_ref, x):
+            q_ref_new = SE32quatpos( 
+                    q_ref @ expm( se3_hat(x[:6]) )
+            )
+            return q_ref_new
+        self._vec_update_Xref = jax.jit(jax.vmap(err2config))
+
+        super(ErrorStateSE3LinearRolloutAutoDiffDynamics, self).__init__()
+
+    @property
+    def state_size(self):
+        """State size."""
+        return self._state_size
+
+    @property
+    def error_state_size(self):
+        """Error-state size."""
+        return self._error_state_size
+
+    @property
+    def vel_state_size(self):
+        """Velocity state size."""
+        return self._vel_state_size
+
+    @property
+    def action_size(self):
+        """Action size."""
+        return self._action_size
+
+    @property
+    def has_hessians(self):
+        """Whether the second order derivatives are available."""
+        return self._has_hessians
+
+    @property
+    def Ib(self):
+        """Moment of inertia in the body frame."""
+        return self._Ib
+
+    @property
+    def m(self):
+        """Mass of the system."""
+        return self._m
+
+    @property
+    def J(self):
+        """Inertia matrix of the system."""
+        return self._J
+    
+    @property
+    def Jinv(self):
+        """Inverse of the inertia matrix."""
+        return self._Jinv
+
+    @property
+    def N(self):
+        """The horizon for dynamics to be valid, due to horizon of given reference."""
+        return self._N
+    
+    @property
+    def dt(self):
+        """Sampling time of the system dynamics."""
+        return self._dt
+    
+    @property
+    def At(self):
+        """Matrix At of the error-state linearization."""
+        return self._At
+    
+    @property
+    def Bt(self):
+        """Matrix Bt of the error-state linearization."""
+        return self._Bt
+
+    def xi_ref(self, i) :
+        """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
+        return self._xi_ref[i]
+
+    def X_ref(self, i) :
+        """Return the Lie group reference X_ref at time index i."""
+        return self._X_ref[i]
+
+    def x_ref(self, i) :
+        """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
+        return self._x_ref[i]
+    
+    def rollout_nominal_with_input(self, q0, xi0, u):
+        """Nonlinear rollout the SE3 trajectory with given input sequence."""
+        
+        N = u.shape[0]
+        q_ref = np.empty(N+1, 4, 4)
+        xi_ref = np.empty(N+1, self._vel_state_size)
+
+        q_ref[0] = q0
+        xi_ref[0] = xi0
+
+        if self.rollout_integration == "euler":
+            f = self._fd_euler_fc_group
+        elif self.rollout_integration == "rk4":
+            f = self._fd_rk4_fc_group
+        
+        for i in range(N):
+            q_ref[i+1], xi_ref[i+1] = f(  q_ref[i], xi_ref[i], u[i], i )
+        
+        return q_ref, xi_ref
+
+
+    def ref_update(self, xs):
+        """Update the error-state dynamics, 
+        with the new error-state rollout trajectory in a parallel style."""
+
+        self._q_ref= self._vec_update_Xref(self._q_ref, xs)
+        return self._q_ref
+
+    def fc(self, x, u, i):
+        """ Continuous linearized dynamicsf.
+
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+
+        # psi = x[:self.error_state_size]
+
+        x = x.reshape(self.state_size, 1)
+        u = u.reshape(self.action_size, 1)
+
+        xi = x[-self.vel_state_size:]
+        omega = xi[:3]
+        v = xi[-3:]
+
+        # print("v is shape of \n", v.shape, "with value", v)
+
+        G = jnp.block([
+            [skew( self.Ib @ omega ), self.m * skew( v )],
+            [self.m * skew( v ), jnp.zeros((3,3))],        
+        ])
+        Ht = self.Jinv @ ( coadjoint( xi ) @ self.J + G )
+        bt = - self.Jinv @ G @ xi
+
+        # print("\nG is shape of", G.shape, "with value \n", G)
+        # print("\nHt is shape of", Ht.shape, "with value \n", Ht)
+        # print("\nbt is shape of", bt.shape, "with value \n", bt)
+
+        At = jnp.block([
+            [- adjoint( self.xi_ref(i) ), jnp.identity( self.error_state_size )],
+            [jnp.zeros((self.vel_state_size, self.error_state_size)), Ht]
+        ])
+        Bt = jnp.vstack((jnp.zeros((self.error_state_size, self.action_size)),
+                self.Jinv ))
+        ht = jnp.vstack( (-self.xi_ref(i), bt ))
+
+        # print("\nAt is shape of", At.shape, "with value \n", At)
+        # print("\nBt is shape of", Bt.shape, "with value \n", Bt)
+        # print("\nht is shape of", ht.shape, "with value \n", ht)
+
+        self._At = At
+        self._Bt = Bt
+
+        xt_dot = At @ x + Bt @ u + ht
+
+        if self._debug and self._debug.get('vel_zero'):
+            xt_dot = xt_dot.at[-self.vel_state_size:].set(0)
+        
+        return xt_dot.reshape(self.state_size,)
+    
+    def _fd_euler_fc_errstate( self, x, u, i ):
+        """ Descrtized linearized error-state dynamics with Eular method.
+
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        return x.reshape(self.state_size,) + self.fc( x,u,i ) * self.dt
+        # return x + self.fc( x,u,i ) * self.dt
+    
+    def _fd_rk4_fc_errstate( self, x, u, i ):
+        """ Descrtized linearized error-state dynamics with RK4 method.
+
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        s1 = self.fc( x, u, i)
+        s2 = self.fc( x+ self.dt/2*s1, u, i )
+        s3 = self.fc( x+ self.dt/2*s2, u, i )
+        s4 = self.fc( x+ self.dt*s3, u, i )
+        x_next = x + self.dt/6 * ( s1 + 2 * s2 + 2 * s3 + s4 )
+    
+        return x_next.reshape(self.state_size,)
+    
+    def _fc_vel(self, xi, u, i):
+        """ Continuous nonlinear dynamics for velocity.
+
+        Args:
+            xi: velocity state [vel_state_size]
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next velocity state [vel_state_size].
+        """
+        
+        xi = xi.reshape(self.vel_state_size, 1)
+        u = u.reshape(self.action_size, 1)
+
+        xi_dot =  self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + u )
+
+        if self._debug and self._debug.get('vel_zero'):
+            xi_dot = np.zeros((self.action_size, 1))
+        
+        return xi_dot.reshape(self.state_size,)
+    
+    def _fd_euler_fc_vel( self, x, u, i ):
+        """ Discretized nonlinear velocity dynamics with Euler method.
+
+        Args:
+            x: Current velocity state [vel_state_size]
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next velocity state [vel_state_size].
+        """
+        return x.reshape(self.state_size,) + self._fc_vel( x,u,i ) * self.dt
+    
+    def _fd_rk4_fc_vel( self, x, u, i ):
+        """ Discretized nonlinear velocity dynamics with RK4 method.
+
+        Args:
+            x: Current velocity state [vel_state_size]
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next velocity state [vel_state_size].
+        """
+        s1 = self._fc_vel( x, u, i)
+        s2 = self._fc_vel( x+ self.dt/2*s1, u, i )
+        s3 = self._fc_vel( x+ self.dt/2*s2, u, i )
+        s4 = self._fc_vel( x+ self.dt*s3, u, i )
+        x_next = x + self.dt/6 * ( s1 + 2 * s2 + 2 * s3 + s4 )
+        return x_next.reshape(self.state_size,)
+    
+    def _fd_euler_fc_group( self, q, xi, u, i ):
+        """ Discretized nonlinear group complete dynamics with euler method.
+
+        Args:
+            q: Current configuration SE(3), [4,4].
+            xi: Current velocity state [vel_state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            q_next: Next configuration SE(3), [4,4].
+            xi_next: Next velocity state [vel_state_size].
+        """
+
+        q_next = q @ expm( se3_hat( xi ) * self.dt )
+        xi_next = self._fd_euler_fc_vel(xi, u, i)
+
+        return q_next, xi_next 
+    
+    def _fd_rk4_fc_group( self, q, xi, u, i ):
+        """ Discretized nonlinear velocity dynamics with RK4 method.
+
+        Args:
+            q: Current configuration SE(3), [4,4].
+            xi: Current velocity state [vel_state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            q_next: Next configuration SE(3), [4,4].
+            xi_next: Next velocity state [vel_state_size].
+        """
+
+        q_next = q @ expm( se3_hat( xi ) * self.dt )
+        xi_next = self._fd_rk4_fc_vel(xi, u, i)
+        return q_next, xi_next 
+    
+
+    def f(self, x, u, i):
+        """Dynamics model.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        return self._f(x,u,i)
+    
+    def f_x(self, x, u, i):
+        """Partial derivative of dynamics model with respect to x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            df/dx [state_size, state_size].
+        """
+        return self._f_x(x,u,i).reshape(self.state_size,self.state_size)
+        # return self._f_x(x,u,i)
+
+    def f_u(self, x, u, i):
+        """Partial derivative of dynamics model with respect to u.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            df/du [state_size, action_size].
+        """
+        return self._f_u(x,u,i).reshape(self.state_size,self.action_size)
+
+    def f_xx(self, x, u, i):
+        """Second partial derivative of dynamics model with respect to x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            d^2f/dx^2 [state_size, state_size, state_size].
+        """
+        if not self._has_hessians:
+            raise NotImplementedError
+
+        return self._f_xx(x,u,i)
+
+    def f_ux(self, x, u, i):
+        """Second partial derivative of dynamics model with respect to u and x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            d^2f/dudx [state_size, action_size, state_size].
+        """
+        if not self._has_hessians:
+            raise NotImplementedError
+
+        return self._f_ux(x,u,i)
+
+    def f_uu(self, x, u, i):
+        """Second partial derivative of dynamics model with respect to u.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            d^2f/du^2 [state_size, action_size, action_size].
+        """
+        if not self._has_hessians:
+            raise NotImplementedError
+
+        return self._f_uu(x,u,i)

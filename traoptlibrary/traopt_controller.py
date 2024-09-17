@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 import jax.numpy as jnp
 import time
-from traoptlibrary.traopt_utilis import is_pos_def,quatpos2SE3
+from traoptlibrary.traopt_utilis import is_pos_def, quatpos2SE3
 
 class BaseController():
 
@@ -1041,7 +1041,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 class iLQR_ErrorState_NonlinearRollout(BaseController):
 
     """Finite Horizon Iterative Linear Quadratic Regulator for ErrorState Dynamics.
-        Rollout out based on the Lie Group dynamics."""
+        Rollout implemented based on the nonlinear dynamics with exp map."""
 
     def __init__(self, dynamics, cost, N, max_reg=1e10, hessians=False,
                  tracking=True, autodiff_dyn=True):
@@ -1132,6 +1132,7 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         xs_hist = []
         us_hist = []
         Xref_hist = []
+        Xref_hist.append(self.dynamics._X_ref)
 
         changed = True
         converged = False
@@ -1147,6 +1148,9 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
                 (xs, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux,
                  F_uu) = self._linearization_rollout(x0, us)
                 J_opt = L.sum()
+                if len(xs_hist) == 0 and len(us_hist) == 0 :
+                    xs_hist.append(xs.copy())
+                    us_hist.append(us.copy())
                 changed = False
             
             end_time = time.perf_counter()
@@ -1211,6 +1215,10 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
             # accepted = True
             if not accepted:
+                # xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
+                #         for xirefi in self.dynamics._xi_ref ]
+                # xs = np.array(xs)   
+
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
                 self._mu = max(self._mu_min, self._mu * self._delta)
@@ -1238,14 +1246,16 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
                 time_calc = end_time - start_time   
                 print("Iteration", iteration, "cost reinitialization finished, Used Time:", time_calc )
 
+            if converged:
+                break
+
             if on_iteration:
                 on_iteration(iteration, xs, us, J_opt, self.dynamics._X_ref,
                              accepted, converged, grad_wrt_input_norm,
                              alpha, self._mu, 
                              J_hist, xs_hist, us_hist, Xref_hist)
 
-            if converged:
-                break
+
 
         # Store fit parameters.
         self._k = k
@@ -1355,16 +1365,17 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         L_ux = np.empty((N, action_size, state_size))
         L_uu = np.empty((N, action_size, action_size))
 
-        xs[0] = x0
+        xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
+              for xirefi in self.dynamics._xi_ref ]
+        xs = np.array(xs)        
+
         for i in range(N):
             x = xs[i]
             u = us[i]
-            # print("In the forward rollout code, u is ", u)
 
-            xs[i + 1] = self.dynamics.f(x, u, i)
+            # xs[i + 1] = self.dynamics.f(x, u, i)
             F_x[i] = self.dynamics.f_x(x, u, i)
             F_u[i] = self.dynamics.f_u(x, u, i)
-            # F_u[i] = self.dynamics.f_u(x, u, i)[:, np.newaxis]
 
             L[i] = self.cost.l(x, u, i, terminal=False)
             L_x[i] = self.cost.l_x(x, u, i, terminal=False)
@@ -1375,13 +1386,6 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
             if self._use_hessians:
                 F_xx[i] = self.dynamics.f_xx(x, u, i)
-
-                # print("Shpae of F_ux[i] is ", F_ux[i].shape)
-                # print("Shpae of dynamics.f_ux is ", self.dynamics.f_ux(x, u, i).shape)
-                # print("x is ",x)
-                # print("u is ",u)
-                # print("f_ux is", self.dynamics.f_ux(x, u, i))
-
                 F_ux[i] = self.dynamics.f_ux(x, u, i)
                 F_uu[i] = self.dynamics.f_uu(x, u, i)
 
@@ -1549,3 +1553,4 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
             # P[t] = p
 
         return g, g_norm_sum/self.N
+
