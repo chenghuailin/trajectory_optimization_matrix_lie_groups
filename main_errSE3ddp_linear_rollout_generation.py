@@ -3,7 +3,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jax import random
-from traoptlibrary.traopt_dynamics import ErrorStateSE3AutoDiffDynamics
+from traoptlibrary.traopt_dynamics import ErrorStateSE3LinearRolloutAutoDiffDynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, AutoDiffCost
 from traoptlibrary.traopt_cost import ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost
 from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3, euler2quat, quat2rotm
@@ -132,7 +132,7 @@ debug_dyn = {"vel_zero": False}
 # Dynamics Instantiation
 # =====================================================
 
-dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS, debug=debug_dyn)
+dynamics = ErrorStateSE3LinearRolloutAutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS, debug=debug_dyn)
 
 # =====================================================
 # Cost Instantiation
@@ -154,26 +154,27 @@ cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goa
 # Solver Instantiation
 # =====================================================
 
-# Intial State
+# Intial State: 
+# For linear rollout, the x0 doesn't really matter, it was actually 
+# given by the reference trajectory
 
-q0 = q0_ref
-p0 = p0_ref
-w0 = w0_ref
-v0 = v0_ref
+# q0 = q0_ref
+# p0 = p0_ref
+# w0 = w0_ref
+# v0 = v0_ref
 
 # p0 = np.array([0.5, 0, 0])
 # w0 = np.array([0.5, 0, 0])
 # v0 = np.array([0.5, 0, 0])
 
-X0 = np.block([
-    [ Quaternion(q0).rotation_matrix, p0.reshape(-1,1) ],
-    [ np.zeros((1,3)),1 ],
-])
-x0 = np.concatenate(( se3_vee(logm( np.linalg.inv(X0_ref) @ X0 )), w0, v0))
-print(f"Initial state is {x0}")
-x0 = jnp.array(x0)
+# X0 = np.block([
+#     [ Quaternion(q0).rotation_matrix, p0.reshape(-1,1) ],
+#     [ np.zeros((1,3)),1 ],
+# ])
+# x0 = np.concatenate(( se3_vee(logm( np.linalg.inv(X0_ref) @ X0 )), w0, v0))
+# print(f"Initial state is {x0}")
+# x0 = jnp.array(x0)
 
-# For linear rollout, the x0 doesn't really matter
 
 us_init = np.zeros((N, action_size,))
 
@@ -181,7 +182,7 @@ ilqr = iLQR_ErrorState_LinearRollout(dynamics, cost, N,
                        hessians=HESSIANS, tracking=False)
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, Xref_hist_ilqr = \
-        ilqr.fit(x0, us_init, n_iterations=200, tol_J=1e-8, on_iteration=on_iteration)
+        ilqr.fit(np.zeros((12,1)), us_init, n_iterations=200, tol_J=1e-8, on_iteration=on_iteration)
 
 
 # =====================================================
