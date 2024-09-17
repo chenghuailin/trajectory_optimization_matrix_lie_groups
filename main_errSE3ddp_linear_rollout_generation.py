@@ -158,10 +158,12 @@ cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goa
 
 q0 = q0_ref
 p0 = p0_ref
-# p0 = np.array([-1., -1., 0.2])
 w0 = w0_ref
-# w0 = np.array([0., 0., 0.]) 
 v0 = v0_ref
+
+# p0 = np.array([0.5, 0, 0])
+# w0 = np.array([0.5, 0, 0])
+# v0 = np.array([0.5, 0, 0])
 
 X0 = np.block([
     [ Quaternion(q0).rotation_matrix, p0.reshape(-1,1) ],
@@ -170,6 +172,8 @@ X0 = np.block([
 x0 = np.concatenate(( se3_vee(logm( np.linalg.inv(X0_ref) @ X0 )), w0, v0))
 print(f"Initial state is {x0}")
 x0 = jnp.array(x0)
+
+# For linear rollout, the x0 doesn't really matter
 
 us_init = np.zeros((N, action_size,))
 
@@ -206,7 +210,6 @@ ax2.grid()
 
 plt.figure(2)
 plt.plot(J_hist_ilqr, label='ilqr')
-# plt.plot(J_hist_ddp, label='ddp')
 plt.title('Cost Comparison')
 plt.xlabel('Iteration')
 plt.ylabel('Cost')
