@@ -3,7 +3,8 @@ import warnings
 import numpy as np
 import jax.numpy as jnp
 import time
-from traoptlibrary.traopt_utilis import is_pos_def, quatpos2SE3
+from traoptlibrary.traopt_utilis import is_pos_def, vec_SE32quatpos, se3_vee
+from scipy.linalg import logm, inv
 
 class BaseController():
 
@@ -1043,8 +1044,8 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
     """Finite Horizon Iterative Linear Quadratic Regulator for ErrorState Dynamics.
         Rollout implemented based on the nonlinear dynamics with exp map."""
 
-    def __init__(self, dynamics, cost, N, max_reg=1e10, hessians=False,
-                 tracking=True, autodiff_dyn=True):
+    def __init__(self, dynamics, cost, N, max_reg=1e10, 
+                 hessians=False, autodiff_dyn=True):
         """Constructs an iLQR solver for Error-State Dynamics
 
         Args:
@@ -1079,13 +1080,13 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
         self._action_size = dynamics.action_size
         self._state_size = dynamics.state_size
-
-        self._tracking = tracking
+        self._error_state_size = dynamics.error_state_size
+        self._vel_state_size = dynamics.vel_state_size
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
 
-        super(iLQR_ErrorState_LinearRollout, self).__init__()
+        super(iLQR_ErrorState_NonlinearRollout, self).__init__()
 
     def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-3,
              on_iteration=None):
@@ -1131,8 +1132,8 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         J_hist = []
         xs_hist = []
         us_hist = []
-        Xref_hist = []
-        Xref_hist.append(self.dynamics._X_ref)
+        qs_hist = []
+        xis_hist = []
 
         changed = True
         converged = False
@@ -1145,12 +1146,14 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
             # Forward rollout only if it needs to be recomputed.
             if changed:
-                (xs, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux,
-                 F_uu) = self._linearization_rollout(x0, us)
+                (xs, qs, xis, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux,
+                 F_uu) = self._linearization(x0, us)
                 J_opt = L.sum()
                 if len(xs_hist) == 0 and len(us_hist) == 0 :
                     xs_hist.append(xs.copy())
                     us_hist.append(us.copy())
+                    qs_hist.append(qs.copy())
+                    xis_hist.append(xis.copy())
                 changed = False
             
             end_time = time.perf_counter()
@@ -1168,7 +1171,7 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
                 # Backtracking line search.
                 for alpha in alphas:
-                    xs_new, us_new = self._control(xs, us, k, K, alpha)
+                    xs_new, us_new, qs_new, xis_new = self._rollout(xs, us, qs, xis, k, K, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
 
                     # grad_wrt_input_norm = 0.
@@ -1179,19 +1182,21 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
                         J_opt = J_new
                         xs = xs_new
                         us = us_new
+                        qs = qs_new
+                        xis = xis_new
                         changed = True
                         accepted = True
                         break
 
                     if J_new < J_opt:
                         if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                        # if np.abs(J_opt - J_new) < tol:
-                        # if grad_wrt_input_norm < tol:
                             converged = True
 
                         J_opt = J_new
                         xs = xs_new
                         us = us_new
+                        qs = qs_new
+                        xis = xis_new
                         changed = True
 
                         # Decrease regularization term.
@@ -1215,10 +1220,6 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
             # accepted = True
             if not accepted:
-                # xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
-                #         for xirefi in self.dynamics._xi_ref ]
-                # xs = np.array(xs)   
-
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
                 self._mu = max(self._mu_min, self._mu * self._delta)
@@ -1228,47 +1229,33 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
             # TODO: not sure if reinitialization should be here 
             # or after converged checkpoint ??
-            if accepted and (not self._tracking) :
+            if accepted :
 
-                end_time = time.perf_counter()
-                time_calc = end_time - start_time   
-                print(f"Iteration {iteration} start reference update,  Used Time: {time_calc}")
+                self.dynamics._q_ref = qs_new
+                self.dynamics._xi_ref = xis_new
 
-                new_X_ref, _ = self.dynamics.ref_reinitialize( xs )
-
-                end_time = time.perf_counter()
-                time_calc = end_time - start_time   
-                print("Iteration", iteration, "dynamics reinitialization finished, Used Time:", time_calc )
-
+                new_X_ref = vec_SE32quatpos( qs_new )
                 _ = self.cost.ref_reinitialize( new_X_ref )
-
-                end_time = time.perf_counter()
-                time_calc = end_time - start_time   
-                print("Iteration", iteration, "cost reinitialization finished, Used Time:", time_calc )
 
             if converged:
                 break
 
             if on_iteration:
-                on_iteration(iteration, xs, us, J_opt, self.dynamics._X_ref,
+                on_iteration(iteration, xs, us, qs, xis, J_opt,
                              accepted, converged, grad_wrt_input_norm,
                              alpha, self._mu, 
-                             J_hist, xs_hist, us_hist, Xref_hist)
-
+                             J_hist, xs_hist, us_hist, qs_hist, xis_hist)
 
 
         # Store fit parameters.
         self._k = k
         self._K = K
-        self._nominal_xs = xs
-        self._nominal_us = us
 
-        if self._tracking:
-            return xs, us, J_hist, jnp.array(xs_hist), us_hist
-        else:
-            return xs, us, J_hist, jnp.array(xs_hist), us_hist, jnp.array(Xref_hist)
+        return xs, us, J_hist, \
+            np.array(xs_hist), np.array(us_hist), \
+            np.array(qs_hist), np.array(xis_hist) 
 
-    def _control(self, xs, us, k, K, alpha=1.0):
+    def _rollout(self, xs, us, qs, xis, k, K, alpha=1.0):
         """Applies the controls for a given trajectory.
 
         Args:
@@ -1285,16 +1272,26 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         """
         xs_new = np.zeros_like(xs)
         us_new = np.zeros_like(us)
+        qs_new = np.zeros_like(qs)
+        xis_new = np.zeros_like(xis)
+
         xs_new[0] = xs[0].copy()
+        qs_new[0] = qs[0].copy()
+        xis_new[0] = xis[0].copy()
 
         for i in range(self.N):
-            # Eq (12).
             us_new[i] = us[i] + alpha * k[i] + K[i].dot(xs_new[i] - xs[i])
 
-            # Eq (8c).
-            xs_new[i + 1] = self.dynamics.f(xs_new[i], us_new[i], i)
+            qs_new[i + 1], xis_new[i + 1] = \
+                self.dynamics.f_rollout(qs_new[i], xis_new[i], us_new[i], i)
+            
+            xs_new[i + 1, :self._error_state_size] = se3_vee(logm(
+                inv( qs[i+1] ) @ qs_new[i + 1]
+            ).real )
 
-        return xs_new, us_new
+            xs_new[i+1, self._error_state_size:] = xis_new[i+1]
+
+        return xs_new, us_new, qs_new, xis_new 
 
     def _trajectory_cost(self, xs, us):
         """Computes the given trajectory's cost.
@@ -1310,7 +1307,7 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
                                                      range(self.N)))
         return sum(J) + self.cost.l(xs[-1], None, self.N, terminal=True)
 
-    def _linearization_rollout(self, x0, us):
+    def _linearization(self, x0, us):
         """Apply the forward dynamics to have a trajectory from the starting
         state x0 by applying the control path us.
 
@@ -1366,8 +1363,10 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         L_uu = np.empty((N, action_size, action_size))
 
         xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
-              for xirefi in self.dynamics._xi_ref ]
-        xs = np.array(xs)        
+              for xirefi in self.dynamics.xi_ref ]
+        xs = np.array(xs)
+        qs = self.dynamics.q_ref.copy()
+        xis = self.dynamics.xi_ref.copy()
 
         for i in range(N):
             x = xs[i]
@@ -1394,7 +1393,7 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         L_x[-1] = self.cost.l_x(x, None, N, terminal=True)
         L_xx[-1] = self.cost.l_xx(x, None, N, terminal=True)
 
-        return xs, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
+        return xs, qs, xis, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
 
     def _backward_pass(self,
                        F_x,

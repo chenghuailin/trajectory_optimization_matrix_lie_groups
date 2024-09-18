@@ -1,4 +1,5 @@
 import numpy as np
+from jax import vmap, jit
 import jax.numpy as jnp
 import jax.lax as lax
 from jax.numpy.linalg import norm
@@ -199,6 +200,8 @@ def SE32quatpos(m):
         )).reshape((7,1))
     else:
         raise ValueError("Input must be a 7-d np or jnp vector")
+    
+vec_SE32quatpos = jit(vmap(SE32quatpos))
 
 def is_pos_def(A):
     """ Check if matrix A is PD """

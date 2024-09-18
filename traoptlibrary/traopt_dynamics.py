@@ -693,8 +693,6 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         self._vel_state_size = state_size[1] 
         self._action_size = action_size
 
-        self._q_ref, self._xi_ref = self.rollout_nominal_with_input( q0, xi0, u0 )
-
         self._Ib = J[0:3, 0:3] 
         self._m = J[4,4]
         self._J = J
@@ -706,6 +704,8 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         self._N = u0.shape[0] - 1
         self._dt = dt
 
+        self._debug = debug
+
         self.errstate_integration = errstate_integration
         if self.errstate_integration == "euler":
             self._f = jit(self._fd_euler_fc_errstate)
@@ -713,21 +713,27 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
             self._f = jit(self._fd_rk4_fc_errstate)
         else:
             raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
-        
+       
         self.rollout_integration = rollout_integration
-        if not (self.errstate_integration == "euler" or self.errstate_integration == "rk4"):
+        if self.rollout_integration == "euler":
+            self._f_rollout = jit(self._fd_euler_fc_group)
+        elif self.rollout_integration == "rk4":
+            self._f_rollout = jit(self._fd_rk4_fc_group)
+        else:
             raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
         
+        self._q_ref, self._xi_ref = self.rollout_nominal_with_input_list( q0, xi0, u0 )
+        self._q_ref = jnp.array(self._q_ref)
+        self._xi_ref = jnp.array(self._xi_ref)
+                
         self._f_x = jit(jacfwd(self._f))
         self._f_u = jit(jacfwd(self._f, argnums=1))
-
+ 
         self._has_hessians = hessians
         if hessians:
             self._f_xx = jit(hessian(self._f, argnums=0))
             self._f_ux = jit(jacfwd( jacfwd(self._f, argnums=1) ))
             self._f_uu = jit(hessian(self._f, argnums=1))
-
-        self._debug = debug
 
         def err2config(q_ref, x):
             q_ref_new = SE32quatpos( 
@@ -736,7 +742,7 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
             return q_ref_new
         self._vec_update_Xref = jax.jit(jax.vmap(err2config))
 
-        super(ErrorStateSE3LinearRolloutAutoDiffDynamics, self).__init__()
+        super(ErrorStateSE3NonlinearRolloutAutoDiffDynamics, self).__init__()
 
     @property
     def state_size(self):
@@ -802,48 +808,47 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
     def Bt(self):
         """Matrix Bt of the error-state linearization."""
         return self._Bt
+    
+    @property
+    def q_ref(self) :
+        """Return the Lie group reference q_ref."""
+        return self._q_ref
+    
+    @property
+    def xi_ref(self) :
+        """Return the velocity reference xi_ref."""
+        return self._xi_ref
 
-    def xi_ref(self, i) :
+    def get_q_ref(self, i) :
+        """Return the Lie group reference q_ref at time index i."""
+        return self._q_ref[i]
+
+    def get_xi_ref(self, i) :
         """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
         return self._xi_ref[i]
 
-    def X_ref(self, i) :
-        """Return the Lie group reference X_ref at time index i."""
-        return self._X_ref[i]
-
-    def x_ref(self, i) :
-        """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
-        return self._x_ref[i]
-    
-    def rollout_nominal_with_input(self, q0, xi0, u):
+    def rollout_nominal_with_input_list(self, q0, xi0, u):
         """Nonlinear rollout the SE3 trajectory with given input sequence."""
         
         N = u.shape[0]
-        q_ref = np.empty(N+1, 4, 4)
-        xi_ref = np.empty(N+1, self._vel_state_size)
+        q_ref = np.empty((N+1, 4, 4))
+        xi_ref = np.empty((N+1, self._vel_state_size,))
 
         q_ref[0] = q0
         xi_ref[0] = xi0
-
-        if self.rollout_integration == "euler":
-            f = self._fd_euler_fc_group
-        elif self.rollout_integration == "rk4":
-            f = self._fd_rk4_fc_group
         
         for i in range(N):
-            q_ref[i+1], xi_ref[i+1] = f(  q_ref[i], xi_ref[i], u[i], i )
+            q_ref[i+1], xi_ref[i+1] = self.f_rollout( q_ref[i], xi_ref[i], u[i], i )
         
         return q_ref, xi_ref
 
-
     def ref_update(self, xs):
-        """Update the error-state dynamics, 
-        with the new error-state rollout trajectory in a parallel style."""
-
+        """Update the reference configuration trajectory with the error-state.
+            Might not be needed in nonlinear rollout"""
         self._q_ref= self._vec_update_Xref(self._q_ref, xs)
         return self._q_ref
 
-    def fc(self, x, u, i):
+    def _fc_errstate(self, x, u, i):
         """ Continuous linearized dynamicsf.
 
         Args:
@@ -865,8 +870,6 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         omega = xi[:3]
         v = xi[-3:]
 
-        # print("v is shape of \n", v.shape, "with value", v)
-
         G = jnp.block([
             [skew( self.Ib @ omega ), self.m * skew( v )],
             [self.m * skew( v ), jnp.zeros((3,3))],        
@@ -874,21 +877,13 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         Ht = self.Jinv @ ( coadjoint( xi ) @ self.J + G )
         bt = - self.Jinv @ G @ xi
 
-        # print("\nG is shape of", G.shape, "with value \n", G)
-        # print("\nHt is shape of", Ht.shape, "with value \n", Ht)
-        # print("\nbt is shape of", bt.shape, "with value \n", bt)
-
         At = jnp.block([
-            [- adjoint( self.xi_ref(i) ), jnp.identity( self.error_state_size )],
+            [- adjoint( self.get_xi_ref(i) ), jnp.identity( self.error_state_size )],
             [jnp.zeros((self.vel_state_size, self.error_state_size)), Ht]
         ])
         Bt = jnp.vstack((jnp.zeros((self.error_state_size, self.action_size)),
                 self.Jinv ))
-        ht = jnp.vstack( (-self.xi_ref(i), bt ))
-
-        # print("\nAt is shape of", At.shape, "with value \n", At)
-        # print("\nBt is shape of", Bt.shape, "with value \n", Bt)
-        # print("\nht is shape of", ht.shape, "with value \n", ht)
+        ht = jnp.vstack( (-self.get_xi_ref(i).reshape(self.vel_state_size,1), bt ))
 
         self._At = At
         self._Bt = Bt
@@ -912,7 +907,7 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         Returns:
             Next state [state_size].
         """
-        return x.reshape(self.state_size,) + self.fc( x,u,i ) * self.dt
+        return x.reshape(self.state_size,) + self._fc_errstate( x,u,i ) * self.dt
         # return x + self.fc( x,u,i ) * self.dt
     
     def _fd_rk4_fc_errstate( self, x, u, i ):
@@ -927,10 +922,10 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         Returns:
             Next state [state_size].
         """
-        s1 = self.fc( x, u, i)
-        s2 = self.fc( x+ self.dt/2*s1, u, i )
-        s3 = self.fc( x+ self.dt/2*s2, u, i )
-        s4 = self.fc( x+ self.dt*s3, u, i )
+        s1 = self._fc_errstate( x, u, i)
+        s2 = self._fc_errstate( x+ self.dt/2*s1, u, i )
+        s3 = self._fc_errstate( x+ self.dt/2*s2, u, i )
+        s4 = self._fc_errstate( x+ self.dt*s3, u, i )
         x_next = x + self.dt/6 * ( s1 + 2 * s2 + 2 * s3 + s4 )
     
         return x_next.reshape(self.state_size,)
@@ -955,7 +950,7 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         if self._debug and self._debug.get('vel_zero'):
             xi_dot = np.zeros((self.action_size, 1))
         
-        return xi_dot.reshape(self.state_size,)
+        return xi_dot.reshape(self.vel_state_size,)
     
     def _fd_euler_fc_vel( self, x, u, i ):
         """ Discretized nonlinear velocity dynamics with Euler method.
@@ -968,7 +963,7 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         Returns:
             Next velocity state [vel_state_size].
         """
-        return x.reshape(self.state_size,) + self._fc_vel( x,u,i ) * self.dt
+        return x.reshape(self.vel_state_size,) + self._fc_vel( x,u,i ) * self.dt
     
     def _fd_rk4_fc_vel( self, x, u, i ):
         """ Discretized nonlinear velocity dynamics with RK4 method.
@@ -986,7 +981,7 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         s3 = self._fc_vel( x+ self.dt/2*s2, u, i )
         s4 = self._fc_vel( x+ self.dt*s3, u, i )
         x_next = x + self.dt/6 * ( s1 + 2 * s2 + 2 * s3 + s4 )
-        return x_next.reshape(self.state_size,)
+        return x_next.reshape(self.vel_state_size,)
     
     def _fd_euler_fc_group( self, q, xi, u, i ):
         """ Discretized nonlinear group complete dynamics with euler method.
@@ -1025,9 +1020,8 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
         xi_next = self._fd_rk4_fc_vel(xi, u, i)
         return q_next, xi_next 
     
-
     def f(self, x, u, i):
-        """Dynamics model.
+        """Linearized error-state dynamics model.
 
         Args:
             x: Current state [state_size].
@@ -1038,6 +1032,19 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
             Next state [state_size].
         """
         return self._f(x,u,i)
+    
+    def f_rollout( self, q, xi, u, i ):
+        """Nonlinear dynamics for rollout.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        return self._f_rollout( q, xi, u, i )
     
     def f_x(self, x, u, i):
         """Partial derivative of dynamics model with respect to x.
