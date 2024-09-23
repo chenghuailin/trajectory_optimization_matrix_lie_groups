@@ -23,7 +23,7 @@ def on_iteration(iteration_count, xs, us, qs, xis, J_opt,
     xis_hist.append(xis.copy())
     
     info = "converged" if converged else ("accepted" if accepted else "failed")
-    print(f"Iteration:{iteration_count}, {info}, cost:{J_opt}, alpha:{alpha}, mu:{mu}")
+    print(f"Iteration:{iteration_count}, {info}, cost:{J_opt}, alpha:{alpha}, mu:{mu}, grad_wrt_input_norm:{grad_wrt_input_norm}")
 
 
 seed = 24234156
@@ -46,6 +46,7 @@ J = np.block([
 # ========================================
 
 N = 400
+Nsim = N
 dt = 0.01
 HESSIANS = False
 action_size = 6
@@ -94,6 +95,10 @@ X_ref = vec_SE32quatpos(dynamics.q_ref)
 # Cost Instantiation
 # =====================================================
 
+# Q = np.identity(6) * 1e4
+# P = np.identity(6) * 1e9
+# R = np.identity(6) * 1e1
+
 Q = np.identity(6) * 1
 P = np.identity(6) * 1e5
 R = np.identity(6) * 1e1
@@ -105,19 +110,95 @@ cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goa
 
 ilqr = iLQR_ErrorState_NonlinearRollout(dynamics, cost, N, hessians=HESSIANS)
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, Xref_hist_ilqr = \
-        ilqr.fit(np.zeros((12,1)), us_init, n_iterations=200, 
-                 tol_J=1e-8, on_iteration=on_iteration)
+xs_ilqr, us_ilqr, qs_ilqr, \
+    J_hist_ilqr, xs_hist_ilqr, \
+    us_hist_ilqr, qs_hist_ilqr, xis_hist = ilqr.fit(np.zeros((12,1)),
+                                                us_init, n_iterations=200, 
+                                                tol_J=1e-3,
+                                                on_iteration=on_iteration)
 
 
+# =====================================================
+# Final Result Visualization with Vector
+# =====================================================
+
+interval_plot = int((Nsim + 1) / 100)
+lim = 15
+
+# Initialize the plot
+fig1 = plt.figure(3)
+ax1 = fig1.add_subplot(111, projection='3d')
+
+# Define an initial vector and plot on figure
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+           color='g', label='Initial Vector')
+goal_vector = quat2rotm( quat_goal ) @ initial_vector
+ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+           goal_vector[0], goal_vector[1], goal_vector[2], 
+           color='y', label='Goal Vector')
 
 
+# Loop through quaternion data to plot rotated vectors
+for i in range(0, Nsim + 1, interval_plot):  
+
+    # =========== 1. Plot the first nominal trajectory ===========
+
+    rot_matrix = qs_hist_ilqr[0, i, :3, :3]  # Get the rotation matrix from the quaternion
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    
+    # Extract the position 
+    position = qs_hist_ilqr[0, i, :3, 3]
+
+    # Plot the rotated vector
+    ax1.quiver(position[0], position[1], position[2],
+              rotated_vector[0], rotated_vector[1], rotated_vector[2],
+              color='b', length=1, label='Initial Nominal Reference' if i == 0 else '')
+    
+    # =========== 2. Plot the final nominal trajectory ===========
+
+    rot_matrix = qs_ilqr[i, :3, :3]  # Extract the quaternion from the X_ref data
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    
+    # Extract the position 
+    position = qs_ilqr[i, :3, 3]
+
+    # Plot the rotated vector
+    ax1.quiver(position[0], position[1], position[2],
+              rotated_vector[0], rotated_vector[1], rotated_vector[2],
+              color='m', length=1, label='Final Nominal Reference' if i == 0 else '')
+    
+    # # =========== 3. Plot the simulated error-state configuration trajectory ===========
+
+    # se3_matrix = qs_ilqr[i] @ expm( se3_hat( xs_ilqr[i, :6]) )
+    
+    # rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
+    # rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+
+    # position = se3_matrix[:3, 3]
+    
+    # # Plot the rotated vector
+    # ax1.quiver(position[0], position[1], position[2],
+    #           rotated_vector[0], rotated_vector[1], rotated_vector[2],
+    #           color='r', length=1, label='Error-State Configuration' if i == 0 else '')
 
 
+# Set the limits for the axes
 
+ax1.set_xlim([-lim, lim]) 
+ax1.set_ylim([-lim, lim])
+ax1.set_zlim([-lim, lim])
+ax1.legend()
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('Z')
 
+# # # =====================================================
+# # # Plotting
+# # # =====================================================
 
-
+# # Display the plot
+plt.show()
 
 
 
