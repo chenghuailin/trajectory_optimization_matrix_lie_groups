@@ -1,9 +1,9 @@
-from traoptlibrary.traopt_controller import iLQR, iLQR_ErrorState
+from traoptlibrary.traopt_controller import iLQR, iLQR_ErrorState_LinearRollout
 import numpy as np
 import jax
 import jax.numpy as jnp
 from jax import random
-from traoptlibrary.traopt_dynamics import ErrorStateSE3AutoDiffDynamics
+from traoptlibrary.traopt_dynamics import ErrorStateSE3LinearRolloutAutoDiffDynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, AutoDiffCost
 from traoptlibrary.traopt_cost import ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost
 from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3
@@ -112,7 +112,7 @@ debug_dyn = {"vel_zero": False}
 # Dynamics Instantiation
 # =====================================================
 
-dynamics = ErrorStateSE3AutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS, debug=debug_dyn)
+dynamics = ErrorStateSE3LinearRolloutAutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS, debug=debug_dyn)
 
 # =====================================================
 # Cost Instantiation
@@ -194,7 +194,7 @@ x0 = jnp.array(x0)
 us_init = np.zeros((N, action_size,))
 
 # ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
-ilqr = iLQR_ErrorState(dynamics, cost, N, 
+ilqr = iLQR_ErrorState_LinearRollout(dynamics, cost, N, 
                        hessians=HESSIANS, tracking=True)
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
