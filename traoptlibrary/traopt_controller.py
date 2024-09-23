@@ -642,7 +642,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
                 # Backtracking line search.
                 for alpha in alphas:
-                    xs_new, us_new = self._control(xs, us, k, K, alpha)
+                    xs_new, us_new = self._control(xs, us, k, K, F_x, F_u, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
 
                     # grad_wrt_input_norm = 0.
@@ -709,6 +709,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                 print(f"Iteration {iteration} start reference update,  Used Time: {time_calc}")
 
                 new_X_ref, _ = self.dynamics.ref_reinitialize( xs )
+                # new_X_ref, _ = self.dynamics.ref_reinitialize_serial( xs )
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -720,15 +721,22 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                 time_calc = end_time - start_time   
                 print("Iteration", iteration, "cost reinitialization finished, Used Time:", time_calc )
 
+            
+            if on_iteration:
+                if self._tracking:
+                    on_iteration(iteration, xs, us, J_opt,
+                                accepted, converged, grad_wrt_input_norm,
+                                alpha, self._mu, 
+                                J_hist, xs_hist, us_hist)
+                else:
+                    on_iteration(iteration, xs, us, J_opt, self.dynamics._X_ref,
+                                accepted, converged, changed, 
+                                grad_wrt_input_norm,
+                                alpha, self._mu, 
+                                J_hist, xs_hist, us_hist, Xref_hist)
+                    
             if converged:
                 break
-
-            if on_iteration:
-                on_iteration(iteration, xs, us, J_opt, self.dynamics._X_ref,
-                             accepted, converged, grad_wrt_input_norm,
-                             alpha, self._mu, 
-                             J_hist, xs_hist, us_hist, Xref_hist)
-
 
 
         # Store fit parameters.
@@ -742,7 +750,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         else:
             return xs, us, J_hist, jnp.array(xs_hist), us_hist, jnp.array(Xref_hist)
 
-    def _control(self, xs, us, k, K, alpha=1.0):
+    def _control(self, xs, us, k, K, F_x, F_u, alpha=1.0):
         """Applies the controls for a given trajectory.
 
         Args:
@@ -767,6 +775,13 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             # Eq (8c).
             xs_new[i + 1] = self.dynamics.f(xs_new[i], us_new[i], i)
+
+            # xs_err = xs_new[i] - xs[i]
+
+            # us_err = alpha * k[i] + K[i].dot(xs_err)
+            # us_new[i] = us[i] + us_err
+
+            # xs_new[i + 1] = xs[i + 1] + F_x[i] @ xs_err + F_u[i] @ us_err
 
         return xs_new, us_new
 
@@ -1073,10 +1088,11 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         # Regularization terms: Levenberg-Marquardt parameter.
         # See II F. Regularization Schedule.
         self._mu = 1.0
-        self._mu_min = 1e-6
+        # self._mu_min = 1e-6
+        self._mu_min = 1e-3
         self._mu_max = max_reg
-        self._delta_0 = 2.0
-        self._delta = self._delta_0
+        # self._delta_0 = 2.0
+        # self._delta = self._delta_0
 
         self._action_size = dynamics.action_size
         self._state_size = dynamics.state_size
@@ -1116,14 +1132,14 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         """
         # Reset regularization term.
         self._mu = 1.0
-        # self._mu = 0.0
-        self._delta = self._delta_0
+        # self._delta = self._delta_0
 
         # Add time 
         start_time = time.perf_counter()
 
         # Backtracking line search candidates 0 < alpha <= 1.
-        alphas = 1.1**(-np.arange(10)**2)
+        # alphas = 1.1**(-np.arange(10)**2)
+        alphas = 1.1**(-np.arange(15)**2)
 
         us = us_init.copy()
         k = self._k
@@ -1158,7 +1174,7 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
-            # print("Iteration:", iteration, "Dynamics Rollout Finished, Used Time:", time_calc )
+            print("Iteration:", iteration, "Linearization Finished, Used Time:", time_calc, "Cost:", J_opt )
 
             try:
                 # Backward pass.
@@ -1167,14 +1183,17 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
                 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                # print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
+                print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
 
                 # Backtracking line search.
                 for alpha in alphas:
                     xs_new, us_new, qs_new, xis_new = self._rollout(xs, us, qs, xis, k, K, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
+                    
+                    end_time = time.perf_counter()
+                    time_calc = end_time - start_time   
+                    print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Cost:", J_new)
 
-                    # grad_wrt_input_norm = 0.
                     _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
                     if grad_wrt_input_norm < tol_grad_norm:
 
@@ -1199,12 +1218,6 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
                         xis = xis_new
                         changed = True
 
-                        # Decrease regularization term.
-                        self._delta = min(1.0, self._delta) / self._delta_0
-                        self._mu *= self._delta
-                        if self._mu <= self._mu_min:
-                            self._mu = 0.0
-
                         # Accept this.
                         accepted = True
                         break
@@ -1216,16 +1229,12 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
             end_time = time.perf_counter()
             time_calc = end_time - start_time   
-            # print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
+            print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
 
             # accepted = True
             if not accepted:
-                # Increase regularization term.
-                self._delta = max(1.0, self._delta) * self._delta_0
-                self._mu = max(self._mu_min, self._mu * self._delta)
-                if self._mu_max and self._mu >= self._mu_max:
-                    warnings.warn("exceeded max regularization term")
-                    break
+                warnings.warn("Problem infeasible, regularization and line search step exhausted")
+                break
 
             # TODO: not sure if reinitialization should be here 
             # or after converged checkpoint ??
@@ -1251,7 +1260,7 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         self._k = k
         self._K = K
 
-        return xs, us, J_hist, \
+        return xs, us, qs, J_hist, \
             np.array(xs_hist), np.array(us_hist), \
             np.array(qs_hist), np.array(xis_hist) 
 
@@ -1437,18 +1446,38 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         K = np.empty_like(self._K)
 
         for i in range(self.N - 1, -1, -1):
-            if self._use_hessians:
-                Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
-                                                     L_u[i], L_xx[i], L_ux[i],
-                                                     L_uu[i], V_x, V_xx,
-                                                     F_xx[i], F_ux[i], F_uu[i])
-            else:
-                Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
-                                                     L_u[i], L_xx[i], L_ux[i],
-                                                     L_uu[i], V_x, V_xx)
-                
-            if not is_pos_def(Q_uu + Q_uu.T):
-                pass
+
+            while True:
+                if self._use_hessians:
+                    Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
+                                                        L_u[i], L_xx[i], L_ux[i],
+                                                        L_uu[i], V_x, V_xx,
+                                                        F_xx[i], F_ux[i], F_uu[i])
+                else:
+                    Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
+                                                        L_u[i], L_xx[i], L_ux[i],
+                                                        L_uu[i], V_x, V_xx)
+
+                if not is_pos_def( Q_uu + Q_uu.T ):
+                    # 如果不是正定的，增大正则化参数 mu，并重新计算
+                    # self._delta = max(1.0, self._delta) * self._delta_0
+                    # self._mu = max(self._mu_min, self._mu * self._delta)
+                    # if self._mu_max and self._mu >= self._mu_max:
+                    #     warnings.warn("exceeded max regularization term during backward pass")
+                    #     break
+                    self._mu = self._mu * 4
+                    if self._mu_max and self._mu >= self._mu_max:
+                        warnings.warn("exceeded max regularization term during backward pass")
+                        break
+                else:
+                    # self._delta = min(1.0, self._delta) / self._delta_0
+                    # self._mu *= self._delta
+                    # if self._mu <= self._mu_min:
+                    #         self._mu = 0.0
+                    # break
+                    self._mu = max(self._mu / 4, self._mu_min)
+                    break
+
 
             # Eq (6).
             k[i] = -np.linalg.solve(Q_uu, Q_u)
@@ -1510,13 +1539,16 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         # Eqs (5a), (5b) and (5c).
         Q_x = l_x + f_x.T.dot(V_x)
         Q_u = l_u + f_u.T.dot(V_x)
-        Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x)
+        # Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x)
 
         # Eqs (11b) and (11c).
-        reg = self._mu * np.eye(self.dynamics.state_size)
-        Q_ux = l_ux + f_u.T.dot(V_xx + reg).dot(f_x)
-        Q_uu = l_uu + f_u.T.dot(V_xx + reg).dot(f_u)
-        # Q_uu = 0.5 * (Q_uu + Q_uu.T) 
+        # reg = self._mu * np.eye(self.dynamics.state_size)
+        # Q_ux = l_ux + f_u.T.dot(V_xx + reg).dot(f_x)
+        # Q_uu = l_uu + f_u.T.dot(V_xx + reg).dot(f_u)
+
+        Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x) +  self._mu * np.eye(self.dynamics.state_size)
+        Q_ux = l_ux + f_u.T.dot(V_xx).dot(f_x)
+        Q_uu = l_uu + f_u.T.dot(V_xx).dot(f_u) +  self._mu * np.eye(self.dynamics.action_size)
 
         if self._use_hessians:
             Q_xx += np.tensordot(V_x, f_xx, axes=1)
