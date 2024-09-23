@@ -305,12 +305,15 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
 
         self._X_ref = X_ref
         self._xi_ref = xi_ref
-        self._x_ref = jnp.concatenate(( X_ref, xi_ref ), axis = 1)
 
         self._Ib = J[0:3, 0:3] 
         self._m = J[4,4]
         self._J = J
         self._Jinv = jnp.linalg.inv(J)
+
+        self._Bt = jnp.vstack(
+            (jnp.zeros((self.error_state_size, self.action_size)),self.Jinv )
+        )
 
         if X_ref.shape[0] != xi_ref.shape[0]:
             raise ValueError("Group reference X and velocity reference \
@@ -318,12 +321,12 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         self._N = X_ref.shape[0] - 1
         self._dt = dt
 
-        self._At = jnp.empty((self._N, self._state_size,self._state_size))
-        self._Bt = jnp.empty((self._N, self._state_size,self._action_size))
-        self._ht = jnp.empty((self._N, self._state_size,self._state_size))
+        self._At_list = jnp.empty((self._N, self._state_size,self._state_size))
+        self._Bt_list = jnp.empty((self._N, self._state_size,self._action_size))
+        self._ht_list = jnp.empty((self._N, self._state_size,self._state_size))
 
         # TODO: Use jit for faster computation
-        self.integration_method = integration_method
+        self._integration_method = integration_method
         if integration_method == "euler":
             self._f = jit(self.fd_euler)
         elif integration_method == "rk4":
@@ -407,16 +410,6 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
     def dt(self):
         """Sampling time of the system dynamics."""
         return self._dt
-    
-    @property
-    def At(self):
-        """Matrix At of the error-state linearization."""
-        return self._At
-    
-    @property
-    def Bt(self):
-        """Matrix Bt of the error-state linearization."""
-        return self._Bt
 
     def xi_ref(self, i) :
         """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
@@ -425,10 +418,6 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
     def X_ref(self, i) :
         """Return the Lie group reference X_ref at time index i."""
         return self._X_ref[i]
-
-    def x_ref(self, i) :
-        """Return the concatenated Lie group and Lie algebra reference X_ref at time index i."""
-        return self._x_ref[i]
     
     def ref_reinitialize_serial( self, xs ) :
         """Re-initialize the error-state dynamics, with the new error-state rollout trajecotory.
@@ -475,6 +464,53 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
             )
 
         return self._X_ref, self._xi_ref
+    
+    def At(self, x, u, i):
+        """ Return the Jacobian matrix A. 
+        
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            At: [state_size, state_size]
+        """
+
+        x = x.reshape(self.state_size, 1)
+        u = u.reshape(self.action_size, 1)
+
+        xi = x[-self.vel_state_size:]
+        omega = xi[:3]
+        v = xi[-3:]
+
+        G = jnp.block([
+            [skew( self.Ib @ omega ), self.m * skew( v )],
+            [self.m * skew( v ), jnp.zeros((3,3))],        
+        ])
+        Ht = self.Jinv @ ( coadjoint( xi ) @ self.J + G )
+
+        At = jnp.block([
+            [- adjoint( self.xi_ref(i) ), jnp.identity( self.error_state_size )],
+            [jnp.zeros((self.vel_state_size, self.error_state_size)), Ht]
+        ])
+
+        return At
+    
+    def Bt(self, x, u, i):
+        """ Return the Jacobian matrix A. 
+        
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            At: [state_size, state_size]
+        """
+        return self._Bt
 
     def fc(self, x, u, i):
         """ Continuous linearized dynamicsf.
@@ -523,8 +559,8 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         # print("\nBt is shape of", Bt.shape, "with value \n", Bt)
         # print("\nht is shape of", ht.shape, "with value \n", ht)
 
-        self._At = At
-        self._Bt = Bt
+        # self._At = At
+        # self._Bt = Bt
 
         xt_dot = At @ x + Bt @ u + ht
 
@@ -593,8 +629,12 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         Returns:
             df/dx [state_size, state_size].
         """
-        return self._f_x(x,u,i).reshape(self.state_size,self.state_size)
-        # return self._f_x(x,u,i)
+        if self._integration_method == "euler":
+            return self.At(x,u,i) * self.dt
+        elif self._integration_method == "rk4":
+            return self._f_x(x,u,i).reshape(self.state_size,self.state_size)
+        else:
+            raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
 
     def f_u(self, x, u, i):
         """Partial derivative of dynamics model with respect to u.
@@ -607,7 +647,12 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         Returns:
             df/du [state_size, action_size].
         """
-        return self._f_u(x,u,i).reshape(self.state_size,self.action_size)
+        if self._integration_method == "euler":
+            return self.Bt(x,u,i) * self.dt
+        elif self._integration_method == "rk4":
+            return self._f_u(x,u,i).reshape(self.state_size,self.action_size)
+        else:
+            raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
 
     def f_xx(self, x, u, i):
         """Second partial derivative of dynamics model with respect to x.
