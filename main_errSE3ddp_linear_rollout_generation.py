@@ -3,7 +3,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jax import random
-from traoptlibrary.traopt_dynamics import ErrorStateSE3LinearRolloutAutoDiffDynamics
+from traoptlibrary.traopt_dynamics import ErrorStateSE3LinearRolloutAutoDiffDynamics, ErrorStateSE3NonlinearRolloutAutoDiffDynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, AutoDiffCost
 from traoptlibrary.traopt_cost import ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost
 from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3, euler2quat, quat2rotm
@@ -14,7 +14,7 @@ from matplotlib import cm
 from matplotlib.colors import Normalize
 
 def on_iteration(iteration_count, xs, us, J_opt, Xref,
-                accepted, converged, grad_wrt_input_norm,
+                accepted, converged, changed, grad_wrt_input_norm,
                 alpha, mu, J_hist, 
                 xs_hist, us_hist, Xref_hist):
     J_hist.append(J_opt)
@@ -22,10 +22,9 @@ def on_iteration(iteration_count, xs, us, J_opt, Xref,
     us_hist.append(us.copy())
     Xref_hist.append(Xref.copy())
     info = "converged" if converged else ("accepted" if accepted else "failed")
-    # final_state = xs[-1]
-    # print("iteration", iteration_count, info, J_opt, "\n", final_state, "\n", alpha, mu)
-    # print("Iteration", iteration_count, info, J_opt, grad_wrt_input_norm, alpha, mu)
-    print(f"Iteration:{iteration_count}, {info}, cost:{J_opt}, alpha:{alpha}, mu:{mu}")
+    info_change = "changed" if changed else "unchanged"
+
+    print(f"Iteration:{iteration_count}, {info}, {info_change}, grad_wrt_input_norm:{grad_wrt_input_norm}, cost:{J_opt}, alpha:{alpha}, mu:{mu}")
 
 seed = 24234156
 key = random.key(seed)
@@ -138,12 +137,6 @@ dynamics = ErrorStateSE3LinearRolloutAutoDiffDynamics(J, X_ref, xi_ref, dt, hess
 # Cost Instantiation
 # =====================================================
 
-# Q = np.diag([ 
-#     10., 10., 10., 5., 5., 5.,
-# ]) * 1e2 
-# P = np.diag([
-#     10., 10., 10., 5., 5., 5.,
-# ]) * 10
 Q = np.identity(6) * 1
 P = np.identity(6) * 1e5
 R = np.identity(6) * 1e1
@@ -153,28 +146,6 @@ cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goa
 # =====================================================
 # Solver Instantiation
 # =====================================================
-
-# Intial State: 
-# For linear rollout, the x0 doesn't really matter, it was actually 
-# given by the reference trajectory
-
-# q0 = q0_ref
-# p0 = p0_ref
-# w0 = w0_ref
-# v0 = v0_ref
-
-# p0 = np.array([0.5, 0, 0])
-# w0 = np.array([0.5, 0, 0])
-# v0 = np.array([0.5, 0, 0])
-
-# X0 = np.block([
-#     [ Quaternion(q0).rotation_matrix, p0.reshape(-1,1) ],
-#     [ np.zeros((1,3)),1 ],
-# ])
-# x0 = np.concatenate(( se3_vee(logm( np.linalg.inv(X0_ref) @ X0 )), w0, v0))
-# print(f"Initial state is {x0}")
-# x0 = jnp.array(x0)
-
 
 us_init = np.zeros((N, action_size,))
 
@@ -398,6 +369,63 @@ ax1.legend()
 ax1.set_xlabel('X')
 ax1.set_ylabel('Y')
 ax1.set_zlabel('Z')
+
+# =====================================================
+# Configuration Trajectory Evolution Visualization with Vector
+# =====================================================
+
+fig1 = plt.figure(6)
+ax1 = fig1.add_subplot(111, projection='3d')
+
+interval_plot = int((Nsim + 1) / 40)
+lim = 15
+
+nonlinear_dynamics = ErrorStateSE3NonlinearRolloutAutoDiffDynamics(J, us_ilqr, X0_ref, 
+                                                         xid_ref, dt, hessians=HESSIANS, 
+                                                         debug=debug_dyn)
+
+# Define an initial vector and plot on figure
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+           color='g', label='Initial Vector')
+goal_vector = quat2rotm( quat_goal ) @ initial_vector
+ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+           goal_vector[0], goal_vector[1], goal_vector[2], 
+           color='r', label='Goal Vector')
+
+# Normalize to create a color map for Xref curves
+norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
+cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
+
+# Loop through quaternion data to plot rotated vectors
+for i in range(0, Nsim + 1, interval_plot):
+
+    se3_matrix = nonlinear_dynamics.q_ref[i]
+
+    rot_matrix = se3_matrix[:3,:3]
+    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    
+    # Extract the position 
+    position = se3_matrix[:3, 3]
+
+    # Plot the rotated vector
+    ax1.quiver(position[0], position[1], position[2],
+            rotated_vector[0], rotated_vector[1], rotated_vector[2],
+            color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
+    
+
+# Set the limits for the axes
+
+ax1.set_title('Configuration Trajectory Revolution')
+
+ax1.set_xlim([-lim, lim]) 
+ax1.set_ylim([-lim, lim])
+ax1.set_zlim([-lim, lim])
+ax1.legend()
+ax1.set_xlabel('X')
+ax1.set_ylabel('Y')
+ax1.set_zlabel('Z')
+
 
 # # =====================================================
 # # Plotting
