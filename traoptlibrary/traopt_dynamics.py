@@ -312,14 +312,15 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         self._J = J
         self._Jinv = jnp.linalg.inv(J)
 
-        self._At = jnp.empty((self._state_size,self._state_size))
-        self._Bt = jnp.empty((self._state_size,self._action_size))
-        
         if X_ref.shape[0] != xi_ref.shape[0]:
             raise ValueError("Group reference X and velocity reference \
                             should share the same time horizon")
         self._N = X_ref.shape[0] - 1
         self._dt = dt
+
+        self._At = jnp.empty((self._N, self._state_size,self._state_size))
+        self._Bt = jnp.empty((self._N, self._state_size,self._action_size))
+        self._ht = jnp.empty((self._N, self._state_size,self._state_size))
 
         # TODO: Use jit for faster computation
         self.integration_method = integration_method
@@ -449,7 +450,7 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
                 )
             )
             self._xi_ref = self._xi_ref.at[i].set(
-                se3_vee( logm( quatpos2SE3( self._X_ref[i]) ).real ).reshape((6,1))
+                xs[i, self.error_state_size:].reshape(6,1)
             )
         
         return self._X_ref, self._xi_ref
@@ -463,9 +464,14 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
 
         self._X_ref= self._vec_update_Xref(self._X_ref, xs)
 
+        # for i in range(self.N + 1):
+        #     self._xi_ref = self._xi_ref.at[i].set(
+        #         se3_vee( logm( quatpos2SE3( self._X_ref[i]) ).real ).reshape((6,1))
+        #     )
+
         for i in range(self.N + 1):
             self._xi_ref = self._xi_ref.at[i].set(
-                se3_vee( logm( quatpos2SE3( self._X_ref[i]) ).real ).reshape((6,1))
+                xs[i, self.error_state_size:].reshape(6,1)
             )
 
         return self._X_ref, self._xi_ref
@@ -700,6 +706,7 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
 
         self._At = jnp.empty((self._state_size,self._state_size))
         self._Bt = jnp.empty((self._state_size,self._action_size))
+        self._ht = jnp.empty((self._state_size, 1))
         
         self._N = u0.shape[0] - 1
         self._dt = dt
@@ -885,10 +892,11 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
                 self.Jinv ))
         ht = jnp.vstack( (-self.get_xi_ref(i).reshape(self.vel_state_size,1), bt ))
 
+        xt_dot = At @ x + Bt @ u + ht
+
         self._At = At
         self._Bt = Bt
-
-        xt_dot = At @ x + Bt @ u + ht
+        self._ht = ht
 
         if self._debug and self._debug.get('vel_zero'):
             xt_dot = xt_dot.at[-self.vel_state_size:].set(0)
