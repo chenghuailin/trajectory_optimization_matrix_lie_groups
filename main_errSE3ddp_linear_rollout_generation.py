@@ -6,25 +6,27 @@ from jax import random
 from traoptlibrary.traopt_dynamics import ErrorStateSE3LinearRolloutAutoDiffDynamics, ErrorStateSE3NonlinearRolloutAutoDiffDynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, AutoDiffCost
 from traoptlibrary.traopt_cost import ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost
-from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3, euler2quat, quat2rotm
+from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3, euler2quat, quat2rotm, vec_SE32quatpos
 from scipy.linalg import expm, logm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import Normalize
 
-def on_iteration(iteration_count, xs, us, J_opt, Xref,
+def on_iteration(iteration_count, xs, us, qs, xis, J_opt,
                 accepted, converged, changed, grad_wrt_input_norm,
                 alpha, mu, J_hist, 
-                xs_hist, us_hist, Xref_hist):
+                xs_hist, us_hist, qs_hist, xis_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
-    Xref_hist.append(Xref.copy())
+    qs_hist.append(qs.copy())
+    xis_hist.append(xis.copy())
+
     info = "converged" if converged else ("accepted" if accepted else "failed")
     info_change = "changed" if changed else "unchanged"
-
-    print(f"Iteration:{iteration_count}, {info}, {info_change}, grad_wrt_input_norm:{grad_wrt_input_norm}, cost:{J_opt}, alpha:{alpha}, mu:{mu}")
+    print(f"Iteration:{iteration_count}, {info}, {info_change}, \
+        grad_wrt_input_norm:{grad_wrt_input_norm}, cost:{J_opt}, alpha:{alpha}, mu:{mu}")
 
 seed = 24234156
 key = random.key(seed)
@@ -60,61 +62,42 @@ q_goal = quatpos2SE3( np.concatenate((quat_goal, pos_goal)) )
 # Nominal Reference Generation
 # =====================================================
 
-q0_ref = np.array([1, 0, 0, 0])
+quat0_ref = np.array([1, 0, 0, 0])
 p0_ref = np.array([0, 0, 0])
 
 euler_devia = np.array([np.pi/4,np.pi/4,np.pi/4])
 w0_ref = ( euler_goal + euler_devia )  / (Nsim * dt)
+print("w0_ref is", w0_ref)
 
-pos_devia = np.array([1,1,-1])
+pos_devia = np.array([1, 1,-1])
 v0_ref = (pos_goal + pos_devia) / (Nsim * dt)
+print("v0_ref is", v0_ref)
 
-x0_ref = np.concatenate((q0_ref, p0_ref))
-X0_ref = np.block([
-    [ Quaternion(q0_ref).rotation_matrix, p0_ref.reshape(-1,1) ],
+q0_ref = np.block([
+    [ quat2rotm(quat0_ref), p0_ref.reshape(-1,1) ],
     [ np.zeros((1,3)),1 ],
 ])
-X = X0_ref.copy()
+X = q0_ref.copy()
 
 xid_ref = np.concatenate((w0_ref, v0_ref))
 
-X_ref = np.zeros((Nsim + 1, 7, 1))  # 7 because of [quat(4) + position(3)]
-xi_ref = np.zeros((Nsim + 1, 6, 1)) 
+q_ref = np.zeros((Nsim + 1, 4, 4))  # SE(3)
+xi_ref = np.zeros((Nsim + 1, 6,)) 
 
-X_ref[0] = x0_ref.reshape(7,1)
-xi_ref[0] = xid_ref.reshape(6,1)
+q_ref[0] = q0_ref.copy()
+xi_ref[0] = xid_ref
 
 for i in range(Nsim):
 
-    xid_ref_rt = xid_ref.copy()
+    X = X @ expm( se3_hat( xid_ref ) * dt)
 
-    # You can try some time-varying twists here:
-    # xid_ref_rt[0] = np.sin(i / 20) * 2
-    # xid_ref_rt[4] = np.cos(np.sqrt(i)) * 1
-    # xid_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
-
-    Xi = np.block([
-        [skew(xid_ref_rt[:3]), xid_ref_rt[3:6].reshape(3, 1)],
-        [np.zeros((1, 3)), 0]
-    ])
-
-    X = X @ expm(Xi * dt)
-
-    # Extract rotation matrix and position vector
-    rot_matrix = X[:3, :3]
-    position = X[:3, 3]
-
-    # Convert rotation matrix to quaternion
-    quaternion = Quaternion(matrix=rot_matrix)
-    quat = quaternion.elements
-
-    # Store the reference trajectory (quaternion + position)
-    X_ref[i + 1] = np.concatenate((quat, position)).reshape(7,1)
+    # Store the reference SE3 configuration
+    q_ref[i + 1] = X.copy()
 
     # Store the reference twists
-    xi_ref[i + 1] = xid_ref_rt.reshape(6,1)
+    xi_ref[i + 1] = xid_ref
 
-X_ref = jnp.array(X_ref)
+q_ref = jnp.array(q_ref)
 xi_ref = jnp.array(xi_ref)
 
 # =====================================================
@@ -131,7 +114,11 @@ debug_dyn = {"vel_zero": False}
 # Dynamics Instantiation
 # =====================================================
 
-dynamics = ErrorStateSE3LinearRolloutAutoDiffDynamics(J, X_ref, xi_ref, dt, hessians=HESSIANS, debug=debug_dyn)
+dynamics = ErrorStateSE3LinearRolloutAutoDiffDynamics(J, q_ref, xi_ref, dt, 
+                                                      hessians=HESSIANS, 
+                                                      debug=debug_dyn,
+                                                      autodiff_dyn=False)
+X_ref = vec_SE32quatpos(dynamics.q_ref)
 
 # =====================================================
 # Cost Instantiation
@@ -152,8 +139,12 @@ us_init = np.zeros((N, action_size,))
 ilqr = iLQR_ErrorState_LinearRollout(dynamics, cost, N, 
                        hessians=HESSIANS, tracking=False)
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, Xref_hist_ilqr = \
-        ilqr.fit(np.zeros((12,1)), us_init, n_iterations=200, tol_J=1e-8, on_iteration=on_iteration)
+xs_ilqr, us_ilqr, qs_ilqr, J_hist_ilqr, \
+    xs_hist_ilqr, us_hist_ilqr, \
+    qs_hist_ilqr, xis_hist_ilqr  = ilqr.fit(np.zeros((12,1)), 
+                                       us_init, n_iterations=200, 
+                                       tol_J=1e-8, 
+                                       on_iteration=on_iteration)
 
 
 # =====================================================
@@ -189,9 +180,9 @@ plt.legend()
 plt.grid()
 
 
-# =====================================================
-# Final Result Visualization with Vector
-# =====================================================
+# # =====================================================
+# # Final Result Visualization with Vector
+# # =====================================================
 
 interval_plot = int((Nsim + 1) / 40)
 lim = 15
@@ -215,11 +206,11 @@ for i in range(0, Nsim + 1, interval_plot):
 
     # =========== 1. Plot the first nominal trajectory ===========
 
-    rot_matrix = quat2rotm(X_ref[i, :4, 0])  # Get the rotation matrix from the quaternion
+    rot_matrix = qs_hist_ilqr[0, i, :3, :3]  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
     # Extract the position 
-    position = X_ref[i, 4:, 0]
+    position = qs_hist_ilqr[0, i, :3, 3]
 
     # Plot the rotated vector
     ax1.quiver(position[0], position[1], position[2],
@@ -228,11 +219,11 @@ for i in range(0, Nsim + 1, interval_plot):
     
     # =========== 2. Plot the final nominal trajectory ===========
 
-    rot_matrix = quat2rotm(Xref_hist_ilqr[-1, i, :4, 0])  # Extract the quaternion from the X_ref data
+    rot_matrix = qs_ilqr[i, :3, :3]  # Extract the quaternion from the X_ref data
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
     # Extract the position 
-    position = Xref_hist_ilqr[-1, i, 4:, 0]
+    position = qs_ilqr[i, :3, 3]
 
     # Plot the rotated vector
     ax1.quiver(position[0], position[1], position[2],
@@ -241,7 +232,7 @@ for i in range(0, Nsim + 1, interval_plot):
     
     # =========== 3. Plot the simulated error-state configuration trajectory ===========
 
-    se3_matrix = quatpos2SE3( Xref_hist_ilqr[-1, i, :, 0] ) @ expm( se3_hat( xs_ilqr[i, :6]) )
+    se3_matrix = qs_ilqr[i] @ expm( se3_hat( xs_ilqr[i, :6]) )
     
     rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
@@ -264,167 +255,172 @@ ax1.set_xlabel('X')
 ax1.set_ylabel('Y')
 ax1.set_zlabel('Z')
 
-# =====================================================
-# Nominal Reference Evolution Visualization with Vector
-# =====================================================
 
-fig1 = plt.figure(4)
-ax1 = fig1.add_subplot(111, projection='3d')
 
-interval_plot = int((Nsim + 1) / 30)
-lim = 15
 
-# Define an initial vector and plot on figure
-initial_vector = np.array([1, 0, 0])  # Example initial vector
-ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
-           color='g', label='Initial Vector')
-goal_vector = quat2rotm( quat_goal ) @ initial_vector
-ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
-           goal_vector[0], goal_vector[1], goal_vector[2], 
-           color='r', label='Goal Vector')
 
-# Normalize to create a color map for Xref curves
-norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
-cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
 
-# Loop through quaternion data to plot rotated vectors
-for i in range( Xref_hist_ilqr.shape[0] ):
-    color = cmap(norm(i)) 
-    for j in range(0, Nsim + 1, interval_plot):  
-        quat = Quaternion(Xref_hist_ilqr[i, j, :4, 0])  # Extract the quaternion from the X_ref data
-        rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
-        rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+# # =====================================================
+# # Nominal Reference Evolution Visualization with Vector
+# # =====================================================
+
+# fig1 = plt.figure(4)
+# ax1 = fig1.add_subplot(111, projection='3d')
+
+# interval_plot = int((Nsim + 1) / 30)
+# lim = 15
+
+# # Define an initial vector and plot on figure
+# initial_vector = np.array([1, 0, 0])  # Example initial vector
+# ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+#            color='g', label='Initial Vector')
+# goal_vector = quat2rotm( quat_goal ) @ initial_vector
+# ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+#            goal_vector[0], goal_vector[1], goal_vector[2], 
+#            color='r', label='Goal Vector')
+
+# # Normalize to create a color map for Xref curves
+# norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
+# cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
+
+# # Loop through quaternion data to plot rotated vectors
+# for i in range( Xref_hist_ilqr.shape[0] ):
+#     color = cmap(norm(i)) 
+#     for j in range(0, Nsim + 1, interval_plot):  
+#         quat = Quaternion(Xref_hist_ilqr[i, j, :4, 0])  # Extract the quaternion from the X_ref data
+#         rot_matrix = quat.rotation_matrix  # Get the rotation matrix from the quaternion
+#         rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
         
-        # Extract the position 
-        position = Xref_hist_ilqr[i, j, 4:, 0]
+#         # Extract the position 
+#         position = Xref_hist_ilqr[i, j, 4:, 0]
 
-        # Plot the rotated vector
-        ax1.quiver(position[0], position[1], position[2],
-                rotated_vector[0], rotated_vector[1], rotated_vector[2],
-                color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
+#         # Plot the rotated vector
+#         ax1.quiver(position[0], position[1], position[2],
+#                 rotated_vector[0], rotated_vector[1], rotated_vector[2],
+#                 color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
     
 
-# Set the limits for the axes
+# # Set the limits for the axes
 
-ax1.set_title('Nominal Trajectory Revolution')
-ax1.set_xlim([-lim, lim]) 
-ax1.set_ylim([-lim, lim])
-ax1.set_zlim([-lim, lim])
-ax1.legend()
-ax1.set_xlabel('X')
-ax1.set_ylabel('Y')
-ax1.set_zlabel('Z')
+# ax1.set_title('Nominal Trajectory Revolution')
+# ax1.set_xlim([-lim, lim]) 
+# ax1.set_ylim([-lim, lim])
+# ax1.set_zlim([-lim, lim])
+# ax1.legend()
+# ax1.set_xlabel('X')
+# ax1.set_ylabel('Y')
+# ax1.set_zlabel('Z')
 
 
-# =====================================================
-# Configuration Trajectory Evolution Visualization with Vector
-# =====================================================
+# # =====================================================
+# # Configuration Trajectory Evolution Visualization with Vector
+# # =====================================================
 
-fig1 = plt.figure(5)
-ax1 = fig1.add_subplot(111, projection='3d')
+# fig1 = plt.figure(5)
+# ax1 = fig1.add_subplot(111, projection='3d')
 
-interval_plot = int((Nsim + 1) / 40)
-lim = 15
+# interval_plot = int((Nsim + 1) / 40)
+# lim = 15
 
-# Define an initial vector and plot on figure
-initial_vector = np.array([1, 0, 0])  # Example initial vector
-ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
-           color='g', label='Initial Vector')
-goal_vector = quat2rotm( quat_goal ) @ initial_vector
-ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
-           goal_vector[0], goal_vector[1], goal_vector[2], 
-           color='r', label='Goal Vector')
+# # Define an initial vector and plot on figure
+# initial_vector = np.array([1, 0, 0])  # Example initial vector
+# ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+#            color='g', label='Initial Vector')
+# goal_vector = quat2rotm( quat_goal ) @ initial_vector
+# ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+#            goal_vector[0], goal_vector[1], goal_vector[2], 
+#            color='r', label='Goal Vector')
 
-# Normalize to create a color map for Xref curves
-norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
-cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
+# # Normalize to create a color map for Xref curves
+# norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
+# cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
 
-# Loop through quaternion data to plot rotated vectors
-for i in range( Xref_hist_ilqr.shape[0]-1 ):
-    color = cmap(norm(i)) 
-    for j in range(0, Nsim + 1, interval_plot):  
+# # Loop through quaternion data to plot rotated vectors
+# for i in range( Xref_hist_ilqr.shape[0]-1 ):
+#     color = cmap(norm(i)) 
+#     for j in range(0, Nsim + 1, interval_plot):  
 
-        se3_matrix = quatpos2SE3( Xref_hist_ilqr[i, j, :, 0] ) @ expm( se3_hat( xs_hist_ilqr[i+1, j, :6]) )
+#         se3_matrix = quatpos2SE3( Xref_hist_ilqr[i, j, :, 0] ) @ expm( se3_hat( xs_hist_ilqr[i+1, j, :6]) )
 
-        rot_matrix = se3_matrix[:3,:3]
-        rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+#         rot_matrix = se3_matrix[:3,:3]
+#         rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
         
-        # Extract the position 
-        position = se3_matrix[:3, 3]
+#         # Extract the position 
+#         position = se3_matrix[:3, 3]
 
-        # Plot the rotated vector
-        ax1.quiver(position[0], position[1], position[2],
-                rotated_vector[0], rotated_vector[1], rotated_vector[2],
-                color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
+#         # Plot the rotated vector
+#         ax1.quiver(position[0], position[1], position[2],
+#                 rotated_vector[0], rotated_vector[1], rotated_vector[2],
+#                 color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
     
 
-# Set the limits for the axes
+# # Set the limits for the axes
 
-ax1.set_title('Configuration Trajectory Revolution')
+# ax1.set_title('Configuration Trajectory Revolution')
 
-ax1.set_xlim([-lim, lim]) 
-ax1.set_ylim([-lim, lim])
-ax1.set_zlim([-lim, lim])
-ax1.legend()
-ax1.set_xlabel('X')
-ax1.set_ylabel('Y')
-ax1.set_zlabel('Z')
+# ax1.set_xlim([-lim, lim]) 
+# ax1.set_ylim([-lim, lim])
+# ax1.set_zlim([-lim, lim])
+# ax1.legend()
+# ax1.set_xlabel('X')
+# ax1.set_ylabel('Y')
+# ax1.set_zlabel('Z')
 
-# =====================================================
-# Configuration Trajectory Evolution Visualization with Vector
-# =====================================================
+# # =====================================================
+# # Configuration Trajectory Evolution Visualization with Vector
+# # =====================================================
 
-fig1 = plt.figure(6)
-ax1 = fig1.add_subplot(111, projection='3d')
+# fig1 = plt.figure(6)
+# ax1 = fig1.add_subplot(111, projection='3d')
 
-interval_plot = int((Nsim + 1) / 40)
-lim = 15
+# interval_plot = int((Nsim + 1) / 40)
+# lim = 15
 
-nonlinear_dynamics = ErrorStateSE3NonlinearRolloutAutoDiffDynamics(J, us_ilqr, X0_ref, 
-                                                         xid_ref, dt, hessians=HESSIANS, 
-                                                         debug=debug_dyn)
+# nonlinear_dynamics = ErrorStateSE3NonlinearRolloutAutoDiffDynamics(J, us_ilqr, X0_ref, 
+#                                                          xid_ref, dt, hessians=HESSIANS, 
+#                                                          debug=debug_dyn)
 
-# Define an initial vector and plot on figure
-initial_vector = np.array([1, 0, 0])  # Example initial vector
-ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
-           color='g', label='Initial Vector')
-goal_vector = quat2rotm( quat_goal ) @ initial_vector
-ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
-           goal_vector[0], goal_vector[1], goal_vector[2], 
-           color='r', label='Goal Vector')
+# # Define an initial vector and plot on figure
+# initial_vector = np.array([1, 0, 0])  # Example initial vector
+# ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
+#            color='g', label='Initial Vector')
+# goal_vector = quat2rotm( quat_goal ) @ initial_vector
+# ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
+#            goal_vector[0], goal_vector[1], goal_vector[2], 
+#            color='r', label='Goal Vector')
 
-# Normalize to create a color map for Xref curves
-norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
-cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
+# # Normalize to create a color map for Xref curves
+# norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
+# cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
 
-# Loop through quaternion data to plot rotated vectors
-for i in range(0, Nsim + 1, interval_plot):
+# # Loop through quaternion data to plot rotated vectors
+# for i in range(0, Nsim + 1, interval_plot):
 
-    se3_matrix = nonlinear_dynamics.q_ref[i]
+#     se3_matrix = nonlinear_dynamics.q_ref[i]
 
-    rot_matrix = se3_matrix[:3,:3]
-    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+#     rot_matrix = se3_matrix[:3,:3]
+#     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
-    # Extract the position 
-    position = se3_matrix[:3, 3]
+#     # Extract the position 
+#     position = se3_matrix[:3, 3]
 
-    # Plot the rotated vector
-    ax1.quiver(position[0], position[1], position[2],
-            rotated_vector[0], rotated_vector[1], rotated_vector[2],
-            color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
+#     # Plot the rotated vector
+#     ax1.quiver(position[0], position[1], position[2],
+#             rotated_vector[0], rotated_vector[1], rotated_vector[2],
+#             color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
     
 
-# Set the limits for the axes
+# # Set the limits for the axes
 
-ax1.set_title('Configuration Trajectory Revolution')
+# ax1.set_title('Configuration Trajectory Revolution')
 
-ax1.set_xlim([-lim, lim]) 
-ax1.set_ylim([-lim, lim])
-ax1.set_zlim([-lim, lim])
-ax1.legend()
-ax1.set_xlabel('X')
-ax1.set_ylabel('Y')
-ax1.set_zlabel('Z')
+# ax1.set_xlim([-lim, lim]) 
+# ax1.set_ylim([-lim, lim])
+# ax1.set_zlim([-lim, lim])
+# ax1.legend()
+# ax1.set_xlabel('X')
+# ax1.set_ylabel('Y')
+# ax1.set_zlabel('Z')
 
 
 # # =====================================================

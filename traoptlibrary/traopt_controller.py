@@ -518,7 +518,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         Rollout implemented based on the linearized dynamics based on error-state."""
 
     def __init__(self, dynamics, cost, N, max_reg=1e10, hessians=False,
-                 tracking=True, autodiff_dyn=True):
+                 tracking=True, debug=None):
         """Constructs an iLQR solver for Error-State Dynamics
 
         Args:
@@ -533,8 +533,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
             tracking: Indication of either controller tracks the 
                 reference trajectory, or generates a trajecotory towards the 
                 given goal configuration, when using the error-state dynamics.
-            autodiff_dyn: Indication of either use autodiff to obtain the
-                derivative of dynamics or use the analytical jacobian
+            debug: Indication of debug mode on or not
         """
         self.dynamics = dynamics
         self.cost = cost
@@ -555,6 +554,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         self._state_size = dynamics.state_size
 
         self._tracking = tracking
+        self._debug = debug
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
@@ -605,8 +605,8 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         J_hist = []
         xs_hist = []
         us_hist = []
-        Xref_hist = []
-        Xref_hist.append(self.dynamics._X_ref)
+        qs_hist = []
+        xis_hist = []
 
         changed = True
         converged = False
@@ -619,12 +619,16 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             # Forward rollout only if it needs to be recomputed.
             if changed:
-                (xs, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux,
-                 F_uu) = self._linearization_rollout(x0, us)
+                # (xs, qs, xis, F_x, F_u, L, L_x, L_u, 
+                # L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
+                (xs, qs, xis, F_x, F_x_autodiff, F_u, L, L_x, L_u, 
+                 L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
                 J_opt = L.sum()
                 if len(xs_hist) == 0 and len(us_hist) == 0 :
                     xs_hist.append(xs.copy())
                     us_hist.append(us.copy())
+                    qs_hist.append(qs.copy())
+                    xis_hist.append(xis.copy())
                 changed = False
             
             end_time = time.perf_counter()
@@ -635,6 +639,11 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                 # Backward pass.
                 k, K = self._backward_pass(F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
                                            F_xx, F_ux, F_uu)
+                k_autodiff, K_autodiff = self._backward_pass(F_x_autodiff, F_u, 
+                                                             L_x, L_u, L_xx, L_ux, L_uu,
+                                                             F_xx, F_ux, F_uu)
+                norm_K_list = [ np.max( K[i] - K_autodiff[i] ) for i in range(self.N) ]
+                norm_k_list = [ np.max( k[i] - k_autodiff[i] ) for i in range(self.N) ]
                 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -642,7 +651,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
                 # Backtracking line search.
                 for alpha in alphas:
-                    xs_new, us_new = self._control(xs, us, k, K, F_x, F_u, alpha)
+                    xs_new, us_new = self._rollout(xs, us, k, K, F_x, F_u, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
 
                     # grad_wrt_input_norm = 0.
@@ -689,10 +698,6 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             # accepted = True
             if not accepted:
-                # xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
-                #         for xirefi in self.dynamics._xi_ref ]
-                # xs = np.array(xs)   
-
                 # Increase regularization term.
                 self._delta = max(1.0, self._delta) * self._delta_0
                 self._mu = max(self._mu_min, self._mu * self._delta)
@@ -708,13 +713,15 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                 time_calc = end_time - start_time   
                 print(f"Iteration {iteration} start reference update,  Used Time: {time_calc}")
 
-                new_X_ref, _ = self.dynamics.ref_reinitialize( xs )
-                # new_X_ref, _ = self.dynamics.ref_reinitialize_serial( xs )
+                qs_new, xis_new = self.dynamics.ref_reinitialize( xs )
+                qs = qs_new
+                xis = xis_new
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
                 print("Iteration", iteration, "dynamics reinitialization finished, Used Time:", time_calc )
 
+                new_X_ref = vec_SE32quatpos( qs_new )
                 _ = self.cost.ref_reinitialize( new_X_ref )
 
                 end_time = time.perf_counter()
@@ -729,11 +736,11 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                                 alpha, self._mu, 
                                 J_hist, xs_hist, us_hist)
                 else:
-                    on_iteration(iteration, xs, us, J_opt, self.dynamics._X_ref,
+                    on_iteration(iteration, xs, us, qs, xis, J_opt,
                                 accepted, converged, changed, 
                                 grad_wrt_input_norm,
                                 alpha, self._mu, 
-                                J_hist, xs_hist, us_hist, Xref_hist)
+                                J_hist, xs_hist, us_hist, qs_hist, xis_hist)
                     
             if converged:
                 break
@@ -746,11 +753,14 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         self._nominal_us = us
 
         if self._tracking:
-            return xs, us, J_hist, jnp.array(xs_hist), us_hist
+            return xs, us, J_hist, \
+                jnp.array(xs_hist), jnp.array(us_hist)
         else:
-            return xs, us, J_hist, jnp.array(xs_hist), us_hist, jnp.array(Xref_hist)
+            return xs, us, qs, J_hist, \
+                np.array(xs_hist), np.array(us_hist), \
+                np.array(qs_hist), np.array(xis_hist) 
 
-    def _control(self, xs, us, k, K, F_x, F_u, alpha=1.0):
+    def _rollout(self, xs, us, k, K, F_x, F_u, alpha=1.0):
         """Applies the controls for a given trajectory.
 
         Args:
@@ -799,7 +809,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                                                      range(self.N)))
         return sum(J) + self.cost.l(xs[-1], None, self.N, terminal=True)
 
-    def _linearization_rollout(self, x0, us):
+    def _linearization(self, x0, us):
         """Apply the forward dynamics to have a trajectory from the starting
         state x0 by applying the control path us.
 
@@ -836,6 +846,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
         xs = np.empty((N + 1, state_size))
         F_x = np.empty((N, state_size, state_size))
+        F_x_autodiff = np.empty((N, state_size, state_size))
         F_u = np.empty((N, state_size, action_size))
 
         # xs = 
@@ -857,7 +868,9 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
         xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
               for xirefi in self.dynamics._xi_ref ]
-        xs = np.array(xs)        
+        xs = np.array(xs)   
+        qs = self.dynamics.q_ref.copy()     
+        xis = self.dynamics.xi_ref.copy()     
 
         # xs[0] = x0
 
@@ -866,7 +879,10 @@ class iLQR_ErrorState_LinearRollout(BaseController):
             u = us[i]
 
             # xs[i + 1] = self.dynamics.f(x, u, i)
-            F_x[i] = self.dynamics.f_x(x, u, i)
+            F_x[i], F_x_autodiff[i] = self.dynamics.f_x(x, u, i)
+            if np.max( np.abs(F_x[i] - F_x_autodiff[i]) ) > 1e-6:
+                print( np.max(np.abs(F_x[i] - F_x_autodiff[i]) ))
+                pass
             F_u[i] = self.dynamics.f_u(x, u, i)
 
             L[i] = self.cost.l(x, u, i, terminal=False)
@@ -878,13 +894,6 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             if self._use_hessians:
                 F_xx[i] = self.dynamics.f_xx(x, u, i)
-
-                # print("Shpae of F_ux[i] is ", F_ux[i].shape)
-                # print("Shpae of dynamics.f_ux is ", self.dynamics.f_ux(x, u, i).shape)
-                # print("x is ",x)
-                # print("u is ",u)
-                # print("f_ux is", self.dynamics.f_ux(x, u, i))
-
                 F_ux[i] = self.dynamics.f_ux(x, u, i)
                 F_uu[i] = self.dynamics.f_uu(x, u, i)
 
@@ -893,7 +902,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         L_x[-1] = self.cost.l_x(x, None, N, terminal=True)
         L_xx[-1] = self.cost.l_xx(x, None, N, terminal=True)
 
-        return xs, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
+        return xs, qs, xis, F_x, F_x_autodiff, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
 
     def _backward_pass(self,
                        F_x,

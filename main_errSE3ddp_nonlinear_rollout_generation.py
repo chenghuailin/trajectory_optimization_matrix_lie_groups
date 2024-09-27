@@ -23,7 +23,8 @@ def on_iteration(iteration_count, xs, us, qs, xis, J_opt,
     xis_hist.append(xis.copy())
     
     info = "converged" if converged else ("accepted" if accepted else "failed")
-    print(f"Iteration:{iteration_count}, {info}, cost:{J_opt}, alpha:{alpha}, mu:{mu}, grad_wrt_input_norm:{grad_wrt_input_norm}")
+    print(f"Iteration:{iteration_count}, {info}, cost:{J_opt}, \
+        alpha:{alpha}, mu:{mu}, grad_wrt_input_norm:{grad_wrt_input_norm}")
 
 
 seed = 24234156
@@ -112,7 +113,7 @@ ilqr = iLQR_ErrorState_NonlinearRollout(dynamics, cost, N, hessians=HESSIANS)
 
 xs_ilqr, us_ilqr, qs_ilqr, \
     J_hist_ilqr, xs_hist_ilqr, \
-    us_hist_ilqr, qs_hist_ilqr, xis_hist = ilqr.fit(np.zeros((12,1)),
+    us_hist_ilqr, qs_hist_ilqr, xis_hist_ilqr = ilqr.fit(np.zeros((12,1)),
                                                 us_init, n_iterations=200, 
                                                 tol_J=1e-3,
                                                 on_iteration=on_iteration)
