@@ -619,10 +619,10 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             # Forward rollout only if it needs to be recomputed.
             if changed:
-                # (xs, qs, xis, F_x, F_u, L, L_x, L_u, 
-                # L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
-                (xs, qs, xis, F_x, F_x_autodiff, F_u, L, L_x, L_u, 
-                 L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
+                (xs, qs, xis, F_x, F_u, L, L_x, L_u, 
+                L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
+                # (xs, qs, xis, F_x, F_x_autodiff, F_u, L, L_x, L_u, 
+                #  L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
                 J_opt = L.sum()
                 if len(xs_hist) == 0 and len(us_hist) == 0 :
                     xs_hist.append(xs.copy())
@@ -639,11 +639,11 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                 # Backward pass.
                 k, K = self._backward_pass(F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
                                            F_xx, F_ux, F_uu)
-                k_autodiff, K_autodiff = self._backward_pass(F_x_autodiff, F_u, 
-                                                             L_x, L_u, L_xx, L_ux, L_uu,
-                                                             F_xx, F_ux, F_uu)
-                norm_K_list = [ np.max( K[i] - K_autodiff[i] ) for i in range(self.N) ]
-                norm_k_list = [ np.max( k[i] - k_autodiff[i] ) for i in range(self.N) ]
+                # k_autodiff, K_autodiff = self._backward_pass(F_x_autodiff, F_u, 
+                #                                              L_x, L_u, L_xx, L_ux, L_uu,
+                #                                              F_xx, F_ux, F_uu)
+                # norm_K_list = [ np.max( K[i] - K_autodiff[i] ) for i in range(self.N) ]
+                # norm_k_list = [ np.max( k[i] - k_autodiff[i] ) for i in range(self.N) ]
                 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -694,7 +694,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             end_time = time.perf_counter()
             time_calc = end_time - start_time   
-            # print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
+            print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
 
             # accepted = True
             if not accepted:
@@ -846,7 +846,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
         xs = np.empty((N + 1, state_size))
         F_x = np.empty((N, state_size, state_size))
-        F_x_autodiff = np.empty((N, state_size, state_size))
+        # F_x_autodiff = np.empty((N, state_size, state_size))
         F_u = np.empty((N, state_size, action_size))
 
         # xs = 
@@ -879,10 +879,11 @@ class iLQR_ErrorState_LinearRollout(BaseController):
             u = us[i]
 
             # xs[i + 1] = self.dynamics.f(x, u, i)
-            F_x[i], F_x_autodiff[i] = self.dynamics.f_x(x, u, i)
-            if np.max( np.abs(F_x[i] - F_x_autodiff[i]) ) > 1e-6:
-                print( np.max(np.abs(F_x[i] - F_x_autodiff[i]) ))
-                pass
+            F_x[i] = self.dynamics.f_x(x, u, i)
+            # F_x[i], F_x_autodiff[i] = self.dynamics.f_x(x, u, i)
+            # if np.max( np.abs(F_x[i] - F_x_autodiff[i]) ) > 1e-6:
+            #     print( np.max(np.abs(F_x[i] - F_x_autodiff[i]) ))
+            #     pass
             F_u[i] = self.dynamics.f_u(x, u, i)
 
             L[i] = self.cost.l(x, u, i, terminal=False)
@@ -902,7 +903,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         L_x[-1] = self.cost.l_x(x, None, N, terminal=True)
         L_xx[-1] = self.cost.l_xx(x, None, N, terminal=True)
 
-        return xs, qs, xis, F_x, F_x_autodiff, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
+        return xs, qs, xis, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
 
     def _backward_pass(self,
                        F_x,

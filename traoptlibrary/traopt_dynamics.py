@@ -629,11 +629,12 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
             df/dx [state_size, state_size].
         """
 
-        analytical = self.At(x,u,i) * self.dt + jnp.identity(self.state_size)
-        autodiff = self._f_x(x,u,i).reshape(self.state_size,self.state_size)
+        # analytical = self.At(x,u,i) * self.dt + jnp.identity(self.state_size)
+        # autodiff = self._f_x(x,u,i).reshape(self.state_size,self.state_size)
 
         if not self._autodiff_dyn:
-            return self.At(x,u,i) * self.dt + + jnp.identity(self.state_size), autodiff
+            # return self.At(x,u,i) * self.dt + + jnp.identity(self.state_size), autodiff
+            return self.At(x,u,i) * self.dt + + jnp.identity(self.state_size)
         else:
             return self._f_x(x,u,i).reshape(self.state_size,self.state_size)
 
