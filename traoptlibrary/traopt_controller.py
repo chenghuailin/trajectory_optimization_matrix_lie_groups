@@ -668,20 +668,12 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
                     if J_new < J_opt:
                         if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                        # if np.abs(J_opt - J_new) < tol:
-                        # if grad_wrt_input_norm < tol:
                             converged = True
 
                         J_opt = J_new
                         xs = xs_new
                         us = us_new
                         changed = True
-
-                        # Decrease regularization term.
-                        self._delta = min(1.0, self._delta) / self._delta_0
-                        self._mu *= self._delta
-                        if self._mu <= self._mu_min:
-                            self._mu = 0.0
 
                         # Accept this.
                         accepted = True
@@ -698,12 +690,8 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             # accepted = True
             if not accepted:
-                # Increase regularization term.
-                self._delta = max(1.0, self._delta) * self._delta_0
-                self._mu = max(self._mu_min, self._mu * self._delta)
-                if self._mu_max and self._mu >= self._mu_max:
-                    warnings.warn("exceeded max regularization term")
-                    break
+                warnings.warn("Problem infeasible, regularization and line search step exhausted")
+                break
 
             # TODO: not sure if reinitialization should be here 
             # or after converged checkpoint ??
@@ -947,18 +935,31 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         K = np.empty_like(self._K)
 
         for i in range(self.N - 1, -1, -1):
-            if self._use_hessians:
-                Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
-                                                     L_u[i], L_xx[i], L_ux[i],
-                                                     L_uu[i], V_x, V_xx,
-                                                     F_xx[i], F_ux[i], F_uu[i])
-            else:
-                Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
-                                                     L_u[i], L_xx[i], L_ux[i],
-                                                     L_uu[i], V_x, V_xx)
+
+            while True:
+                if self._use_hessians:
+                    Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
+                                                        L_u[i], L_xx[i], L_ux[i],
+                                                        L_uu[i], V_x, V_xx,
+                                                        F_xx[i], F_ux[i], F_uu[i])
+                else:
+                    Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
+                                                        L_u[i], L_xx[i], L_ux[i],
+                                                        L_uu[i], V_x, V_xx)
                 
-            if not is_pos_def(Q_uu + Q_uu.T):
-                pass
+                if not is_pos_def(Q_uu + Q_uu.T):
+                    # Increase regularization term.
+                    self._delta = max(1.0, self._delta) * self._delta_0
+                    self._mu = max(self._mu_min, self._mu * self._delta)
+                    if self._mu_max and self._mu >= self._mu_max:
+                        warnings.warn("exceeded max regularization term")
+                        break
+                else:
+                    self._delta = min(1.0, self._delta) / self._delta_0
+                    self._mu *= self._delta
+                    if self._mu <= self._mu_min:
+                            self._mu = 0.0
+                    break
 
             # Eq (6).
             k[i] = -np.linalg.solve(Q_uu, Q_u)
@@ -1098,11 +1099,11 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         # Regularization terms: Levenberg-Marquardt parameter.
         # See II F. Regularization Schedule.
         self._mu = 1.0
-        # self._mu_min = 1e-6
-        self._mu_min = 1e-3
+        self._mu_min = 1e-6
+        # self._mu_min = 1e-3
         self._mu_max = max_reg
-        # self._delta_0 = 2.0
-        # self._delta = self._delta_0
+        self._delta_0 = 2.0
+        self._delta = self._delta_0
 
         self._action_size = dynamics.action_size
         self._state_size = dynamics.state_size
@@ -1470,23 +1471,24 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
 
                 if not is_pos_def( Q_uu + Q_uu.T ):
                     # 如果不是正定的，增大正则化参数 mu，并重新计算
-                    # self._delta = max(1.0, self._delta) * self._delta_0
-                    # self._mu = max(self._mu_min, self._mu * self._delta)
-                    # if self._mu_max and self._mu >= self._mu_max:
-                    #     warnings.warn("exceeded max regularization term during backward pass")
-                    #     break
-                    self._mu = self._mu * 4
+                    self._delta = max(1.0, self._delta) * self._delta_0
+                    self._mu = max(self._mu_min, self._mu * self._delta)
                     if self._mu_max and self._mu >= self._mu_max:
                         warnings.warn("exceeded max regularization term during backward pass")
                         break
+
+                    # self._mu = self._mu * 4
+                    # if self._mu_max and self._mu >= self._mu_max:
+                    #     warnings.warn("exceeded max regularization term during backward pass")
+                    #     break
                 else:
-                    # self._delta = min(1.0, self._delta) / self._delta_0
-                    # self._mu *= self._delta
-                    # if self._mu <= self._mu_min:
-                    #         self._mu = 0.0
-                    # break
-                    self._mu = max(self._mu / 4, self._mu_min)
+                    self._delta = min(1.0, self._delta) / self._delta_0
+                    self._mu *= self._delta
+                    if self._mu <= self._mu_min:
+                            self._mu = 0.0
                     break
+                    # self._mu = max(self._mu / 4, self._mu_min)
+                    # break
 
 
             # Eq (6).
@@ -1549,16 +1551,16 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         # Eqs (5a), (5b) and (5c).
         Q_x = l_x + f_x.T.dot(V_x)
         Q_u = l_u + f_u.T.dot(V_x)
-        # Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x)
+        Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x)
 
         # Eqs (11b) and (11c).
-        # reg = self._mu * np.eye(self.dynamics.state_size)
-        # Q_ux = l_ux + f_u.T.dot(V_xx + reg).dot(f_x)
-        # Q_uu = l_uu + f_u.T.dot(V_xx + reg).dot(f_u)
+        reg = self._mu * np.eye(self.dynamics.state_size)
+        Q_ux = l_ux + f_u.T.dot(V_xx + reg).dot(f_x)
+        Q_uu = l_uu + f_u.T.dot(V_xx + reg).dot(f_u)
 
-        Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x) +  self._mu * np.eye(self.dynamics.state_size)
-        Q_ux = l_ux + f_u.T.dot(V_xx).dot(f_x)
-        Q_uu = l_uu + f_u.T.dot(V_xx).dot(f_u) +  self._mu * np.eye(self.dynamics.action_size)
+        # Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x) +  self._mu * np.eye(self.dynamics.state_size)
+        # Q_ux = l_ux + f_u.T.dot(V_xx).dot(f_x)
+        # Q_uu = l_uu + f_u.T.dot(V_xx).dot(f_u) +  self._mu * np.eye(self.dynamics.action_size)
 
         if self._use_hessians:
             Q_xx += np.tensordot(V_x, f_xx, axes=1)
