@@ -630,12 +630,20 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                     qs_hist.append(qs.copy())
                     xis_hist.append(xis.copy())
                 changed = False
+
+                _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
+                if grad_wrt_input_norm < tol_grad_norm:
+                    converged = True
+                    # accepted = True
+                    changed = False
+                    break
+                print("Iteration:", iteration, "Linearization gradient:", grad_wrt_input_norm )
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
-            # print("Iteration:", iteration, "Dynamics Rollout Finished, Used Time:", time_calc )
+            print("Iteration:", iteration, "Linearization Finished, Used Time:", time_calc, "Cost:", J_opt )
 
-            try:
+            if converged == False:
                 # Backward pass.
                 k, K = self._backward_pass(F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
                                            F_xx, F_ux, F_uu)
@@ -647,24 +655,16 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                # print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
+                print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
 
                 # Backtracking line search.
                 for alpha in alphas:
                     xs_new, us_new = self._rollout(xs, us, k, K, F_x, F_u, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
 
-                    # grad_wrt_input_norm = 0.
-                    _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
-                    if grad_wrt_input_norm < tol_grad_norm:
-
-                        converged = True
-                        J_opt = J_new
-                        xs = xs_new
-                        us = us_new
-                        changed = True
-                        accepted = True
-                        break
+                    end_time = time.perf_counter()
+                    time_calc = end_time - start_time   
+                    print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Cost:", J_new)
 
                     if J_new < J_opt:
                         if np.abs((J_opt - J_new) / J_opt) < tol_J:
@@ -679,22 +679,10 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                         accepted = True
                         break
 
-            except np.linalg.LinAlgError as e:
-                # Quu was not positive-definite and this diverged.
-                # Try again with a higher regularization term.
-                warnings.warn(str(e))
-
             end_time = time.perf_counter()
             time_calc = end_time - start_time   
             print("Iteration:", iteration, "Control Rollout and Line Search Finished, Used Time:", time_calc )
 
-            # accepted = True
-            if not accepted:
-                warnings.warn("Problem infeasible, regularization and line search step exhausted")
-                break
-
-            # TODO: not sure if reinitialization should be here 
-            # or after converged checkpoint ??
             if accepted and (not self._tracking) :
 
                 end_time = time.perf_counter()
@@ -733,6 +721,9 @@ class iLQR_ErrorState_LinearRollout(BaseController):
             if converged:
                 break
 
+            if not accepted:
+                warnings.warn("Problem infeasible, regularization and line search step exhausted")
+                break
 
         # Store fit parameters.
         self._k = k
@@ -764,8 +755,13 @@ class iLQR_ErrorState_LinearRollout(BaseController):
                 us: control path [N, action_size].
         """
         xs_new = np.zeros_like(xs)
+        # xs_new = xs.copy()
         us_new = np.zeros_like(us)
         xs_new[0] = xs[0].copy()
+
+        xs_new2 = np.zeros_like(xs)
+        us_new2 = np.zeros_like(us)
+        xs_new2[0] = xs[0].copy()
 
         for i in range(self.N):
             # Eq (12).
@@ -774,14 +770,17 @@ class iLQR_ErrorState_LinearRollout(BaseController):
             # Eq (8c).
             xs_new[i + 1] = self.dynamics.f(xs_new[i], us_new[i], i)
 
-            # xs_err = xs_new[i] - xs[i]
+            # --------------------------------------------------------- #
+
+            # xs_err = xs_new2[i] - xs[i]
 
             # us_err = alpha * k[i] + K[i].dot(xs_err)
-            # us_new[i] = us[i] + us_err
+            # us_new2[i] = us[i] + us_err
 
-            # xs_new[i + 1] = xs[i + 1] + F_x[i] @ xs_err + F_u[i] @ us_err
+            # xs_new2[i + 1] = xs[i + 1] + F_x[i] @ xs_err + F_u[i] @ us_err
 
         return xs_new, us_new
+        # return xs_new2, us_new2
 
     def _trajectory_cost(self, xs, us):
         """Computes the given trajectory's cost.
@@ -834,10 +833,12 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
         xs = np.empty((N + 1, state_size))
         F_x = np.empty((N, state_size, state_size))
-        # F_x_autodiff = np.empty((N, state_size, state_size))
         F_u = np.empty((N, state_size, action_size))
 
-        # xs = 
+        if self.dynamics._debug.get('derivative_compare'):
+            F_x_autodiff = np.empty((N, state_size, state_size))
+            F_u_autodiff = np.empty((N, state_size, action_size))
+
         if self._use_hessians:
             F_xx = np.empty((N, state_size, state_size, state_size))
             F_ux = np.empty((N, state_size, action_size, state_size))
@@ -857,22 +858,32 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
               for xirefi in self.dynamics._xi_ref ]
         xs = np.array(xs)   
-        qs = self.dynamics.q_ref.copy()     
-        xis = self.dynamics.xi_ref.copy()     
-
+        qs = self.dynamics.q_ref.copy()
+        xis = self.dynamics.xi_ref.copy()   
+     
         # xs[0] = x0
+
+        xs_debug = np.empty((N + 1, state_size))
+        xs_debug[0] = xs[0]
 
         for i in range(N):
             x = xs[i]
             u = us[i]
 
-            # xs[i + 1] = self.dynamics.f(x, u, i)
-            F_x[i] = self.dynamics.f_x(x, u, i)
-            # F_x[i], F_x_autodiff[i] = self.dynamics.f_x(x, u, i)
-            # if np.max( np.abs(F_x[i] - F_x_autodiff[i]) ) > 1e-6:
-            #     print( np.max(np.abs(F_x[i] - F_x_autodiff[i]) ))
-            #     pass
-            F_u[i] = self.dynamics.f_u(x, u, i)
+            xs_debug[i + 1] = self.dynamics.f(xs_debug[i], u, i)
+
+            if self.dynamics._debug.get('derivative_compare'):
+                F_x[i], F_x_autodiff[i] = self.dynamics.f_x(x, u, i)
+                if np.max( np.abs(F_x[i] - F_x_autodiff[i]) ) > 1e-6:
+                    # print( np.abs(F_x[i] - F_x_autodiff[i]) )
+                    pass
+                F_u[i], F_u_autodiff[i] = self.dynamics.f_u(x, u, i)
+                if np.max( np.abs(F_u[i] - F_u_autodiff[i]) ) > 1e-6:
+                    # print( np.abs(F_u[i] - F_u_autodiff[i]) )
+                    pass
+            else:                  
+                F_x[i] = self.dynamics.f_x(x, u, i)
+                F_u[i] = self.dynamics.f_u(x, u, i)                     
 
             L[i] = self.cost.l(x, u, i, terminal=False)
             L_x[i] = self.cost.l_x(x, u, i, terminal=False)
@@ -1242,11 +1253,6 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
             time_calc = end_time - start_time   
             print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
 
-            # accepted = True
-            if not accepted:
-                warnings.warn("Problem infeasible, regularization and line search step exhausted")
-                break
-
             # TODO: not sure if reinitialization should be here 
             # or after converged checkpoint ??
             if accepted :
@@ -1265,6 +1271,10 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
                              accepted, converged, grad_wrt_input_norm,
                              alpha, self._mu, 
                              J_hist, xs_hist, us_hist, qs_hist, xis_hist)
+            
+            if not accepted:
+                warnings.warn("Problem infeasible, regularization and line search step exhausted")
+                break
 
 
         # Store fit parameters.

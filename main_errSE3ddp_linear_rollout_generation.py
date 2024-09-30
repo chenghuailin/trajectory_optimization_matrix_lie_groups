@@ -108,7 +108,7 @@ N = Nsim
 HESSIANS = False
 action_size = 6
 state_size = 12
-debug_dyn = {"vel_zero": False}
+debug_dyn = {"vel_zero": False, "derivative_compare": False}
 
 # =====================================================
 # Dynamics Instantiation
@@ -198,8 +198,11 @@ ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2],
 goal_vector = quat2rotm( quat_goal ) @ initial_vector
 ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
            goal_vector[0], goal_vector[1], goal_vector[2], 
-           color='y', label='Goal Vector')
+           color='r', label='Goal Vector')
 
+nonlinear_dynamics = ErrorStateSE3NonlinearRolloutAutoDiffDynamics(J, us_ilqr, q0_ref, 
+                                                         xid_ref, dt, hessians=HESSIANS, 
+                                                         debug=debug_dyn)
 
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, interval_plot):  
@@ -219,6 +222,8 @@ for i in range(0, Nsim + 1, interval_plot):
     
     # =========== 2. Plot the final nominal trajectory ===========
 
+    # se3_matrix = qs_ilqr[i] @ expm( se3_hat( xs_ilqr[i, :6]) )
+
     rot_matrix = qs_ilqr[i, :3, :3]  # Extract the quaternion from the X_ref data
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
     
@@ -230,20 +235,20 @@ for i in range(0, Nsim + 1, interval_plot):
               rotated_vector[0], rotated_vector[1], rotated_vector[2],
               color='m', length=1, label='Final Nominal Reference' if i == 0 else '')
     
-    # =========== 3. Plot the simulated error-state configuration trajectory ===========
+    # =========== 3. Plot the nonlinear rollout trajectory ===========
 
-    se3_matrix = qs_ilqr[i] @ expm( se3_hat( xs_ilqr[i, :6]) )
-    
-    rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
+    se3_matrix = nonlinear_dynamics.q_ref[i]
+
+    rot_matrix = se3_matrix[:3,:3]
     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
-
-    position = se3_matrix[:3, 3]
     
+    # Extract the position 
+    position = se3_matrix[:3, 3]
+
     # Plot the rotated vector
     ax1.quiver(position[0], position[1], position[2],
-              rotated_vector[0], rotated_vector[1], rotated_vector[2],
-              color='r', length=1, label='Error-State Configuration' if i == 0 else '')
-
+            rotated_vector[0], rotated_vector[1], rotated_vector[2],
+            color='c', length=1, label='Nonlinear Rollout' if i == 0 else '')
 
 # Set the limits for the axes
 
@@ -254,10 +259,6 @@ ax1.legend()
 ax1.set_xlabel('X')
 ax1.set_ylabel('Y')
 ax1.set_zlabel('Z')
-
-
-
-
 
 
 # # =====================================================
@@ -352,62 +353,6 @@ ax1.set_zlabel('Z')
 #         ax1.quiver(position[0], position[1], position[2],
 #                 rotated_vector[0], rotated_vector[1], rotated_vector[2],
 #                 color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
-    
-
-# # Set the limits for the axes
-
-# ax1.set_title('Configuration Trajectory Revolution')
-
-# ax1.set_xlim([-lim, lim]) 
-# ax1.set_ylim([-lim, lim])
-# ax1.set_zlim([-lim, lim])
-# ax1.legend()
-# ax1.set_xlabel('X')
-# ax1.set_ylabel('Y')
-# ax1.set_zlabel('Z')
-
-# # =====================================================
-# # Configuration Trajectory Evolution Visualization with Vector
-# # =====================================================
-
-# fig1 = plt.figure(6)
-# ax1 = fig1.add_subplot(111, projection='3d')
-
-# interval_plot = int((Nsim + 1) / 40)
-# lim = 15
-
-# nonlinear_dynamics = ErrorStateSE3NonlinearRolloutAutoDiffDynamics(J, us_ilqr, X0_ref, 
-#                                                          xid_ref, dt, hessians=HESSIANS, 
-#                                                          debug=debug_dyn)
-
-# # Define an initial vector and plot on figure
-# initial_vector = np.array([1, 0, 0])  # Example initial vector
-# ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], 
-#            color='g', label='Initial Vector')
-# goal_vector = quat2rotm( quat_goal ) @ initial_vector
-# ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2], 
-#            goal_vector[0], goal_vector[1], goal_vector[2], 
-#            color='r', label='Goal Vector')
-
-# # Normalize to create a color map for Xref curves
-# norm = Normalize(vmin=0, vmax=Xref_hist_ilqr.shape[0] * 1)  # Adjust the normalization range for more difference
-# cmap = plt.colormaps['plasma']  # Choose a colormap with more contrast
-
-# # Loop through quaternion data to plot rotated vectors
-# for i in range(0, Nsim + 1, interval_plot):
-
-#     se3_matrix = nonlinear_dynamics.q_ref[i]
-
-#     rot_matrix = se3_matrix[:3,:3]
-#     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
-    
-#     # Extract the position 
-#     position = se3_matrix[:3, 3]
-
-#     # Plot the rotated vector
-#     ax1.quiver(position[0], position[1], position[2],
-#             rotated_vector[0], rotated_vector[1], rotated_vector[2],
-#             color=color, length=1, label='Iteration '+str(i) if j == 0 else '')
     
 
 # # Set the limits for the axes

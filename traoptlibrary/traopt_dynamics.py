@@ -352,8 +352,12 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
             q_ref_new = q_ref @ expm( se3_hat(x[:6]) )
             return q_ref_new
         
+        def update_xi_ref(xs):
+            return xs[self.error_state_size:]
+        
         # Use vmap to parallelize the update_ref function
         self._vec_update_qref = jax.jit(jax.vmap(update_Xref))
+        self._vec_update_xi_ref = jax.jit(jax.vmap(update_xi_ref))
 
         super(ErrorStateSE3LinearRolloutAutoDiffDynamics, self).__init__()
 
@@ -449,20 +453,25 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         """Re-initialize the error-state dynamics, 
         with the new error-state rollout trajectory in a parallel style."""
         
-        # print(f"X_ref has type: {type(self._X_ref)}")
-        # print(f"xi_ref has type: {type(self._xi_ref)}")
-
         self._q_ref= self._vec_update_qref(self._q_ref, xs)
+        self._xi_ref = self._vec_update_xi_ref(xs)
 
-        # for i in range(self.N + 1):
-        #     self._xi_ref = self._xi_ref.at[i].set(
-        #         se3_vee( logm( quatpos2SE3( self._X_ref[i]) ).real ).reshape((6,1))
-        #     )
+        if self._autodiff_dyn:
 
-        for i in range(self.N + 1):
-            self._xi_ref = self._xi_ref.at[i].set(
-                xs[i, self.error_state_size:]
-            )
+            if self._integration_method == "euler":
+                self._f = jit(self.fd_euler)
+            elif self._integration_method == "rk4":
+                self._f = jit(self.fd_rk4)
+            else:
+                raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
+        
+            self._f_x = jit(jacfwd(self._f))
+            self._f_u = jit(jacfwd(self._f, argnums=1))
+
+            if self._has_hessians:
+                self._f_xx = jit(hessian(self._f, argnums=0))
+                self._f_ux = jit(jacfwd( jacfwd(self._f, argnums=1) ))
+                self._f_uu = jit(hessian(self._f, argnums=1))
 
         return self._q_ref, self._xi_ref
     
@@ -629,12 +638,12 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
             df/dx [state_size, state_size].
         """
 
-        # analytical = self.At(x,u,i) * self.dt + jnp.identity(self.state_size)
-        # autodiff = self._f_x(x,u,i).reshape(self.state_size,self.state_size)
-
-        if not self._autodiff_dyn:
-            # return self.At(x,u,i) * self.dt + + jnp.identity(self.state_size), autodiff
-            return self.At(x,u,i) * self.dt + + jnp.identity(self.state_size)
+        if self._debug and self._debug.get('derivative_compare'):
+            analytical = self.At(x,u,i) * self.dt + jnp.identity(self.state_size)
+            autodiff = self._f_x(x,u,i).reshape(self.state_size,self.state_size)
+            return analytical, autodiff
+        elif not self._autodiff_dyn:            
+            return self.At(x,u,i) * self.dt + jnp.identity(self.state_size)
         else:
             return self._f_x(x,u,i).reshape(self.state_size,self.state_size)
 
@@ -649,7 +658,12 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         Returns:
             df/du [state_size, action_size].
         """
-        if not self._autodiff_dyn:
+    
+        if self._debug and self._debug.get('derivative_compare'):
+            analytical = self.Bt(x,u,i) * self.dt
+            autodiff = self._f_u(x,u,i).reshape(self.state_size,self.action_size)
+            return analytical, autodiff
+        elif not self._autodiff_dyn:            
             return self.Bt(x,u,i) * self.dt
         else:
             return self._f_u(x,u,i).reshape(self.state_size,self.action_size)

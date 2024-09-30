@@ -69,18 +69,22 @@ q_goal = quatpos2SE3( np.concatenate((quat_goal, pos_goal)) )
 # Yaw-pitch-roll rotation order (ZYX convention)
 euler0 = [0.,  jnp.pi / 3., jnp.pi / 3.]
 quat0 = euler2quat(euler0) 
-p0 = np.array([0.5, 0, 0])
-w0 = np.array([0.5, 0, 0])
-v0 = np.array([0.5, 0, 0])
+p0 = np.array([0., 0., 0.])
+
+euler_devia = np.array([np.pi/4,np.pi/4,np.pi/4])
+w0 = ( euler_goal + euler_devia )  / (Nsim * dt)
+
+pos_devia = np.array([1, 1,-1])
+v0 = (pos_goal + pos_devia) / (Nsim * dt)
 
 q0 = np.block([
     [ Quaternion(quat0).rotation_matrix, p0.reshape(-1,1) ],
     [ np.zeros((1,3)),1 ],
 ])
-xi0 = np.array([0.,0.,0.,1.,0.,0.])
+xi0 = np.concatenate((w0, v0))
 
 # us_init = np.zeros((N, action_size,))
-row = np.array([0., 0., 0., 1., 1., 1.])
+row = np.array([0., 0., 0., 0., 0., 0.])
 us_init = np.tile(row, (N, 1))
 
 # =====================================================
@@ -96,13 +100,14 @@ X_ref = vec_SE32quatpos(dynamics.q_ref)
 # Cost Instantiation
 # =====================================================
 
-# Q = np.identity(6) * 1e4
-# P = np.identity(6) * 1e9
+Q = np.identity(6) * 1
+P = np.identity(6) * 1e7
+R = np.identity(6) * 1e3
+
+# Q = np.identity(6) * 1
+# P = np.identity(6) * 1e5
 # R = np.identity(6) * 1e1
 
-Q = np.identity(6) * 1
-P = np.identity(6) * 1e5
-R = np.identity(6) * 1e1
 cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goal)
 
 # =====================================================
@@ -139,7 +144,6 @@ ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2],
            goal_vector[0], goal_vector[1], goal_vector[2], 
            color='y', label='Goal Vector')
 
-
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, interval_plot):  
 
@@ -169,20 +173,6 @@ for i in range(0, Nsim + 1, interval_plot):
               rotated_vector[0], rotated_vector[1], rotated_vector[2],
               color='m', length=1, label='Final Nominal Reference' if i == 0 else '')
     
-    # # =========== 3. Plot the simulated error-state configuration trajectory ===========
-
-    # se3_matrix = qs_ilqr[i] @ expm( se3_hat( xs_ilqr[i, :6]) )
-    
-    # rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
-    # rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
-
-    # position = se3_matrix[:3, 3]
-    
-    # # Plot the rotated vector
-    # ax1.quiver(position[0], position[1], position[2],
-    #           rotated_vector[0], rotated_vector[1], rotated_vector[2],
-    #           color='r', length=1, label='Error-State Configuration' if i == 0 else '')
-
 
 # Set the limits for the axes
 
