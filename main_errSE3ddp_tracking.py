@@ -1,4 +1,4 @@
-from traoptlibrary.traopt_controller import iLQR, iLQR_ErrorState_LinearRollout
+from traoptlibrary.traopt_controller import iLQR_ErrorState_Tracking
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -194,7 +194,7 @@ x0 = jnp.array(x0)
 us_init = np.zeros((N, action_size,))
 
 # ilqr = iLQR(dynamics, cost, N, hessians=HESSIANS)
-ilqr = iLQR_ErrorState_LinearRollout(dynamics, cost, N, 
+ilqr = iLQR_ErrorState_Tracking(dynamics, cost, N, 
                        hessians=HESSIANS, tracking=True)
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
