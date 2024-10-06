@@ -1072,14 +1072,13 @@ class iLQR_ErrorState_Tracking(BaseController):
         return g, g_norm_sum/self.N
 
 
-
 class iLQR_ErrorState_LinearRollout(BaseController):
 
     """Finite Horizon Iterative Linear Quadratic Regulator for ErrorState Dynamics.
         Rollout implemented based on the linearized dynamics based on error-state."""
 
     def __init__(self, dynamics, cost, N, max_reg=1e10, hessians=False,
-                 tracking=True, debug=None):
+                 debug=None):
         """Constructs an iLQR solver for Error-State Dynamics
 
         Args:
@@ -1091,9 +1090,6 @@ class iLQR_ErrorState_LinearRollout(BaseController):
             hessians: Use the dynamic model's second order derivatives.
                 Default: only use first order derivatives. (i.e. iLQR instead
                 of DDP).
-            tracking: Indication of either controller tracks the 
-                reference trajectory, or generates a trajecotory towards the 
-                given goal configuration, when using the error-state dynamics.
             debug: Indication of debug mode on or not
         """
         self.dynamics = dynamics
@@ -1114,7 +1110,6 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         self._action_size = dynamics.action_size
         self._state_size = dynamics.state_size
 
-        self._tracking = tracking
         self._debug = debug
 
         self._k = np.zeros((N, self._action_size))
@@ -1239,7 +1234,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
             time_calc = end_time - start_time   
             print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
 
-            if accepted and (not self._tracking) :
+            if accepted:
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -1262,17 +1257,11 @@ class iLQR_ErrorState_LinearRollout(BaseController):
 
             
             if on_iteration:
-                if self._tracking:
-                    on_iteration(iteration, xs, us, J_opt,
-                                accepted, converged, grad_wrt_input_norm,
-                                alpha, self._mu, 
-                                J_hist, xs_hist, us_hist)
-                else:
-                    on_iteration(iteration, xs, us, qs, xis, J_opt,
-                                accepted, converged, changed, 
-                                grad_wrt_input_norm,
-                                alpha, self._mu, 
-                                J_hist, xs_hist, us_hist, qs_hist, xis_hist)
+                on_iteration(iteration, xs, us, qs, xis, J_opt,
+                            accepted, converged, changed, 
+                            grad_wrt_input_norm,
+                            alpha, self._mu, 
+                            J_hist, xs_hist, us_hist, qs_hist, xis_hist)
                     
             if converged:
                 break
@@ -1285,13 +1274,9 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         self._k = k
         self._K = K
 
-        if self._tracking:
-            return xs, us, J_hist, \
-                jnp.array(xs_hist), jnp.array(us_hist)
-        else:
-            return xs, us, qs, J_hist, \
-                np.array(xs_hist), np.array(us_hist), \
-                np.array(qs_hist), np.array(xis_hist) 
+        return xs, us, qs, J_hist, \
+            np.array(xs_hist), np.array(us_hist), \
+            np.array(qs_hist), np.array(xis_hist) 
 
     def _rollout(self, xs, us, k, K, F_x, F_u, alpha=1.0):
         """Applies the controls for a given trajectory.

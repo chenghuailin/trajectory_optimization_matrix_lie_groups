@@ -137,7 +137,7 @@ cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goa
 us_init = np.zeros((N, action_size,))
 
 ilqr = iLQR_ErrorState_LinearRollout(dynamics, cost, N, 
-                       hessians=HESSIANS, tracking=False)
+                                hessians=HESSIANS)
 
 xs_ilqr, us_ilqr, qs_ilqr, J_hist_ilqr, \
     xs_hist_ilqr, us_hist_ilqr, \
