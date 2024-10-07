@@ -306,6 +306,7 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
 
         self._q_ref = q_ref
         self._xi_ref = xi_ref
+        self._q_ref_inv = jnp.array([ np.linalg.inv(q) for q in q_ref])
 
         self._Ib = J[0:3, 0:3] 
         self._m = J[4,4]
@@ -349,7 +350,7 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         self._debug = debug
 
         def update_Xref(q_ref, x):
-            q_ref_new = q_ref @ expm( se3_hat(x[:6]) )
+            q_ref_new = q_ref @ expm( se3_hat(x[:self.error_state_size]) )
             return q_ref_new
         
         def update_xi_ref(xs):
@@ -715,6 +716,60 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
             raise NotImplementedError
 
         return self._f_uu(x,u,i)
+    
+    def _fc_vel(self, xi, u, i):
+        """ Continuous nonlinear dynamics for velocity.
+
+        Args:
+            xi: velocity state [vel_state_size]
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next velocity state [vel_state_size].
+        """
+        
+        xi = xi.reshape(self.vel_state_size, 1)
+        u = u.reshape(self.action_size, 1)
+
+        xi_dot =  self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + u )
+
+        if self._debug and self._debug.get('vel_zero'):
+            xi_dot = np.zeros((self.action_size, 1))
+        
+        return xi_dot.reshape(self.vel_state_size,)
+    
+    def _fd_euler_fc_vel( self, x, u, i ):
+        """ Discretized nonlinear velocity dynamics with Euler method.
+
+        Args:
+            x: Current velocity state [vel_state_size]
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next velocity state [vel_state_size].
+        """
+        return x.reshape(self.vel_state_size,) + self._fc_vel( x,u,i ) * self.dt
+    
+    def _fd_euler_fc_group( self, q, xi, u, i ):
+        """ Discretized nonlinear group complete dynamics with euler method.
+
+        Args:
+            q: Current configuration SE(3), [4,4].
+            xi: Current velocity state [vel_state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            q_next: Next configuration SE(3), [4,4].
+            xi_next: Next velocity state [vel_state_size].
+        """
+
+        q_next = q @ expm( se3_hat( xi ) * self.dt )
+        xi_next = self._fd_euler_fc_vel(xi, u, i)
+
+        return q_next, xi_next 
     
 
 class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):

@@ -90,7 +90,8 @@ debug_dyn = {"vel_zero": False}
 
 dynamics = ErrorStateSE3LinearRolloutAutoDiffDynamics(J, q_ref, xi_ref, dt, 
                                                       hessians=HESSIANS, 
-                                                      debug=debug_dyn)
+                                                      debug=debug_dyn,
+                                                      autodiff_dyn=True)
 
 # =====================================================
 # Cost Instantiation
@@ -128,7 +129,8 @@ xi0 = np.concatenate((w0, v0))
 us_init = np.zeros((N, action_size,))
 
 ilqr = iLQR_ErrorState_Tracking(dynamics, cost, N, 
-                                hessians=HESSIANS)
+                                hessians=HESSIANS,
+                                rollout='linear')
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)

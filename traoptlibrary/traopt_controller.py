@@ -3,8 +3,9 @@ import warnings
 import numpy as np
 import jax.numpy as jnp
 import time
-from traoptlibrary.traopt_utilis import is_pos_def, vec_SE32quatpos, se3_vee
-from scipy.linalg import logm, inv
+from jax import jit
+from traoptlibrary.traopt_utilis import is_pos_def, vec_SE32quatpos, se3_vee, se3_hat
+from scipy.linalg import logm, inv, expm
 
 class BaseController():
 
@@ -550,12 +551,15 @@ class iLQR_ErrorState_Tracking(BaseController):
 
         self._action_size = dynamics.action_size
         self._state_size = dynamics.state_size
+        self._error_state_size  = dynamics._error_state_size
 
         self._rollout_mode = rollout
         self._debug = debug
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
+
+        self.f_nonlinear = jit(self.dynamics._fd_euler_fc_group)
 
         super(iLQR_ErrorState_Tracking, self).__init__()
 
@@ -619,8 +623,6 @@ class iLQR_ErrorState_Tracking(BaseController):
             if changed:
                 (xs, qs, xis, F_x, F_u, L, L_x, L_u, 
                 L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
-                # (xs, qs, xis, F_x, F_x_autodiff, F_u, L, L_x, L_u, 
-                #  L_xx, L_ux, L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
                 J_opt = L.sum()
                 if len(xs_hist) == 0 and len(us_hist) == 0 :
                     xs_hist.append(xs.copy())
@@ -712,32 +714,36 @@ class iLQR_ErrorState_Tracking(BaseController):
                 xs: state path [N+1, state_size].
                 us: control path [N, action_size].
         """
-        # xs_new = np.zeros_like(xs)
-        # us_new = np.zeros_like(us)
-        xs_new2 = np.zeros_like(xs)
-        us_new2 = np.zeros_like(us)
+        xs_new = np.zeros_like(xs)
+        us_new = np.zeros_like(us)
 
-        # xs_new[0] = xs[0].copy()
-        xs_new2[0] = xs[0].copy()
+        xs_new[0] = xs[0].copy()
 
         for i in range(self.N):
-            # # Eq (12).
-            # us_new[i] = us[i] + alpha * k[i] + K[i].dot(xs_new[i] - xs[i])
 
-            # # Eq (8c).
-            # xs_new[i + 1] = self.dynamics.f(xs_new[i], us_new[i], i)
-
-            # --------------------------------------------------------- #
-
-            xs_err = xs_new2[i] - xs[i]
+            xs_err = xs_new[i] - xs[i]
 
             us_err = alpha * k[i] + K[i].dot(xs_err)
-            us_new2[i] = us[i] + us_err
+            
+            us_new[i] = us[i] + us_err
 
-            xs_new2[i + 1] = xs[i + 1] + F_x[i] @ xs_err + F_u[i] @ us_err
+            if self._rollout_mode == 'linear':
 
-        # return xs_new, us_new
-        return xs_new2, us_new2
+                xs_new[i + 1] = xs[i + 1] + F_x[i] @ xs_err + F_u[i] @ us_err
+
+            elif self._rollout_mode == 'nonlinear':
+
+                q_next, xi_next = self.f_nonlinear( 
+                    self.dynamics._q_ref[i] @ expm(se3_hat(xs_new[i, :self._error_state_size])),
+                    xs_new[i, self._error_state_size:],
+                    us_new[i],
+                    i
+                )
+                xs_new[i+1] = np.concatenate(
+                    ( se3_vee( logm(self.dynamics._q_ref_inv[i+1] @ q_next) ) , xi_next ) 
+                )
+                
+        return xs_new, us_new
 
     def _trajectory_cost(self, xs, us):
         """Computes the given trajectory's cost.
