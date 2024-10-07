@@ -518,7 +518,7 @@ class iLQR_ErrorState_Tracking(BaseController):
         Rollout implemented based on the linearized dynamics based on error-state."""
 
     def __init__(self, dynamics, cost, N, max_reg=1e10, hessians=False,
-                 tracking=True, debug=None):
+                 rollout='linear', debug=None):
         """Constructs an iLQR solver for Error-State Dynamics
 
         Args:
@@ -530,9 +530,7 @@ class iLQR_ErrorState_Tracking(BaseController):
             hessians: Use the dynamic model's second order derivatives.
                 Default: only use first order derivatives. (i.e. iLQR instead
                 of DDP).
-            tracking: Indication of either controller tracks the 
-                reference trajectory, or generates a trajecotory towards the 
-                given goal configuration, when using the error-state dynamics.
+            rollout: Determine the rollout method, 'linear' or 'nonlinear'.
             debug: Indication of debug mode on or not
         """
         self.dynamics = dynamics
@@ -553,7 +551,7 @@ class iLQR_ErrorState_Tracking(BaseController):
         self._action_size = dynamics.action_size
         self._state_size = dynamics.state_size
 
-        self._tracking = tracking
+        self._rollout_mode = rollout
         self._debug = debug
 
         self._k = np.zeros((N, self._action_size))
@@ -636,7 +634,7 @@ class iLQR_ErrorState_Tracking(BaseController):
                     converged = True
                     # accepted = True
                     changed = False
-                    print("Iteration", iteration, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
+                    print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
                     break
                 print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
             
@@ -678,41 +676,12 @@ class iLQR_ErrorState_Tracking(BaseController):
             end_time = time.perf_counter()
             time_calc = end_time - start_time   
             print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
-
-            if accepted and (not self._tracking) :
-
-                end_time = time.perf_counter()
-                time_calc = end_time - start_time   
-                print(f"Iteration {iteration} start reference update, Used Time: {time_calc}")
-
-                qs_new, xis_new = self.dynamics.ref_reinitialize( xs )
-                qs = qs_new
-                xis = xis_new
-
-                end_time = time.perf_counter()
-                time_calc = end_time - start_time   
-                print("Iteration", iteration, "dynamics reinitialization finished, Used Time:", time_calc )
-
-                new_X_ref = vec_SE32quatpos( qs_new )
-                _ = self.cost.ref_reinitialize( new_X_ref )
-
-                end_time = time.perf_counter()
-                time_calc = end_time - start_time   
-                print("Iteration", iteration, "cost reinitialization finished, Used Time:", time_calc )
-
-            
+           
             if on_iteration:
-                if self._tracking:
-                    on_iteration(iteration, xs, us, J_opt,
-                                accepted, converged, grad_wrt_input_norm,
-                                alpha, self._mu, 
-                                J_hist, xs_hist, us_hist)
-                else:
-                    on_iteration(iteration, xs, us, qs, xis, J_opt,
-                                accepted, converged, changed, 
-                                grad_wrt_input_norm,
-                                alpha, self._mu, 
-                                J_hist, xs_hist, us_hist, qs_hist, xis_hist)
+                on_iteration(iteration, xs, us, J_opt,
+                            accepted, converged, grad_wrt_input_norm,
+                            alpha, self._mu, 
+                            J_hist, xs_hist, us_hist)
                     
             if converged:
                 break
@@ -725,13 +694,8 @@ class iLQR_ErrorState_Tracking(BaseController):
         self._k = k
         self._K = K
 
-        if self._tracking:
-            return xs, us, J_hist, \
-                jnp.array(xs_hist), jnp.array(us_hist)
-        else:
-            return xs, us, qs, J_hist, \
-                np.array(xs_hist), np.array(us_hist), \
-                np.array(qs_hist), np.array(xis_hist) 
+        return xs, us, J_hist, \
+            jnp.array(xs_hist), jnp.array(us_hist)
 
     def _rollout(self, xs, us, k, K, F_x, F_u, alpha=1.0):
         """Applies the controls for a given trajectory.
@@ -748,13 +712,12 @@ class iLQR_ErrorState_Tracking(BaseController):
                 xs: state path [N+1, state_size].
                 us: control path [N, action_size].
         """
-        xs_new = np.zeros_like(xs)
-        # xs_new = xs.copy()
-        us_new = np.zeros_like(us)
-        xs_new[0] = xs[0].copy()
-
+        # xs_new = np.zeros_like(xs)
+        # us_new = np.zeros_like(us)
         xs_new2 = np.zeros_like(xs)
         us_new2 = np.zeros_like(us)
+
+        # xs_new[0] = xs[0].copy()
         xs_new2[0] = xs[0].copy()
 
         for i in range(self.N):
@@ -849,16 +812,10 @@ class iLQR_ErrorState_Tracking(BaseController):
         L_ux = np.empty((N, action_size, state_size))
         L_uu = np.empty((N, action_size, action_size))
 
-        # xs = [ np.concatenate(( np.zeros((6,)), xirefi.reshape(6,) )) 
-        #       for xirefi in self.dynamics._xi_ref ]
-        # xs = np.array(xs)   
         qs = self.dynamics.q_ref.copy()
         xis = self.dynamics.xi_ref.copy()   
      
         xs[0] = x0
-
-        # xs_debug = np.empty((N + 1, state_size))
-        # xs_debug[0] = xs[0]
 
         for i in range(N):
             x = xs[i]

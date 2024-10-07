@@ -95,7 +95,7 @@ for i in range(Nsim):
     q_ref[i + 1] = X.copy()
 
     # Store the reference twists
-    xi_ref[i + 1] = xid_ref
+    xi_ref[i + 1] = xid_ref.copy()
 
 q_ref = jnp.array(q_ref)
 xi_ref = jnp.array(xi_ref)
