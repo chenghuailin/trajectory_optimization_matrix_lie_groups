@@ -513,7 +513,7 @@ class iLQR(BaseController):
         return g, g_norm_sum/self.N
 
 
-class iLQR_ErrorState_Tracking(BaseController):
+class iLQR_Tracking_ErrorState_Approx(BaseController):
 
     """Finite Horizon Iterative Linear Quadratic Regulator for ErrorState Dynamics.
         Rollout implemented based on the linearized dynamics based on error-state."""
@@ -561,7 +561,7 @@ class iLQR_ErrorState_Tracking(BaseController):
 
         self.f_nonlinear = jit(self.dynamics._fd_euler_fc_group)
 
-        super(iLQR_ErrorState_Tracking, self).__init__()
+        super(iLQR_Tracking_ErrorState, self).__init__()
 
     def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-3,
              on_iteration=None):
@@ -1035,7 +1035,7 @@ class iLQR_ErrorState_Tracking(BaseController):
         return g, g_norm_sum/self.N
 
 
-class iLQR_ErrorState_LinearRollout(BaseController):
+class iLQR_Generation_ErrorState_Approx_LinearRollout(BaseController):
 
     """Finite Horizon Iterative Linear Quadratic Regulator for ErrorState Dynamics.
         Rollout implemented based on the linearized dynamics based on error-state."""
@@ -1078,7 +1078,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
 
-        super(iLQR_ErrorState_LinearRollout, self).__init__()
+        super(iLQR_Generation_ErrorState_Approx_LinearRollout, self).__init__()
 
     def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-3,
              on_iteration=None):
@@ -1580,7 +1580,7 @@ class iLQR_ErrorState_LinearRollout(BaseController):
         return g, g_norm_sum/self.N
 
 
-class iLQR_ErrorState_NonlinearRollout(BaseController):
+class iLQR_Generation_ErrorState_Approx_NonlinearRollout(BaseController):
 
     """Finite Horizon Iterative Linear Quadratic Regulator for ErrorState Dynamics.
         Rollout implemented based on the nonlinear dynamics with exp map."""
@@ -1628,7 +1628,7 @@ class iLQR_ErrorState_NonlinearRollout(BaseController):
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
 
-        super(iLQR_ErrorState_NonlinearRollout, self).__init__()
+        super(iLQR_Generation_ErrorState_Approx_NonlinearRollout, self).__init__()
 
     def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-3,
              on_iteration=None):

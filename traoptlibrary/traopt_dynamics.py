@@ -268,7 +268,7 @@ class AutoDiffDynamics(BaseDynamics):
         return self._f_uu(x,u,i)
     
 
-class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
+class ErrorStateSE3ApproxLinearRolloutDynamics(BaseDynamics):
 
     """Error-State SE(3) Dynamics Model implemented with Jax"""
 
@@ -360,7 +360,7 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         self._vec_update_qref = jax.jit(jax.vmap(update_Xref))
         self._vec_update_xi_ref = jax.jit(jax.vmap(update_xi_ref))
 
-        super(ErrorStateSE3LinearRolloutAutoDiffDynamics, self).__init__()
+        super(ErrorStateSE3ApproxLinearRolloutDynamics, self).__init__()
 
     @property
     def state_size(self):
@@ -772,7 +772,7 @@ class ErrorStateSE3LinearRolloutAutoDiffDynamics(BaseDynamics):
         return q_next, xi_next 
     
 
-class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
+class ErrorStateSE3ApproxNonlinearRolloutDynamics(BaseDynamics):
 
     """Error-State SE(3) Dynamics Model implemented with Jax"""
 
@@ -863,7 +863,7 @@ class ErrorStateSE3NonlinearRolloutAutoDiffDynamics(BaseDynamics):
             return q_ref_new
         self._vec_update_Xref = jax.jit(jax.vmap(err2config))
 
-        super(ErrorStateSE3NonlinearRolloutAutoDiffDynamics, self).__init__()
+        super(ErrorStateSE3ApproxNonlinearRolloutDynamics, self).__init__()
 
     @property
     def state_size(self):

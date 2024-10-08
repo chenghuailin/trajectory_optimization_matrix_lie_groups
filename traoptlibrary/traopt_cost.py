@@ -271,7 +271,7 @@ class AutoDiffCost(BaseCost):
         return self._l_uu(x,u,i)
     
 
-class ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost(BaseCost):
+class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
 
     """
         Instantaneous Stage Cost defined on Lie Algebra for SE(3) Error-state Dynamics.
@@ -326,7 +326,7 @@ class ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost(BaseCost):
         self._l_x_terminal = jit(jacfwd(self._l_terminal))
         self._l_xx_terminal = jit(hessian(self._l_terminal))
 
-        super(ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, self).__init__()
+        super(ErrorStateSE3ApproxTrackingQuadraticAutodiffCost, self).__init__()
 
     @property
     def state_size(self):
@@ -522,7 +522,7 @@ class ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost(BaseCost):
         return self._l_uu(x,u,i).reshape(self.action_size,self.action_size)
     
 
-class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
+class ErrorStateSE3ApproxGenerationQuadraticAutodiffCost(BaseCost):
 
     """
         Instantaneous Stage Cost defined on Lie Algebra for SE(3) Error-state Dynamics.
@@ -605,7 +605,7 @@ class ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost(BaseCost):
         self._l_x_terminal = jit(jacfwd(self._l_terminal))
         self._l_xx_terminal = jit(hessian(self._l_terminal))
 
-        super(ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost, self).__init__()
+        super(ErrorStateSE3ApproxGenerationQuadraticAutodiffCost, self).__init__()
 
     @property
     def state_size(self):
