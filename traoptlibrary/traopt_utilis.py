@@ -4,6 +4,8 @@ import jax.numpy as jnp
 import jax.lax as lax
 from jax.numpy.linalg import norm
 from pyquaternion import Quaternion
+from manifpy import SE3, SE3Tangent
+from concurrent.futures import ThreadPoolExecutor
 
 def skew( w ):
     """Get the isomorphic element in the Lie algebra for SO3, 
@@ -256,3 +258,79 @@ def euler2quat(eulerAngles:jnp.ndarray|list)->jnp.ndarray:
     p = jnp.r_[q0, q1, q2, q3]
     
     return p
+
+def SE32manifSE3( x ):
+    """ Converts a SE(3) matrix to a manif SE(3) object
+
+        Args: 
+            x: SE3 matrix, numpy array, (4, 4) .
+    """
+    quatpos = SE32quatpos(x)
+    pos = quatpos[4:].reshape(3,1)
+    quat = quatpos[:4].reshape(4,1)
+    # return pos, quat
+    return SE3(position=pos, quaternion=quat)
+
+def manifSE32SE3( x ):
+    """ Converts a manif SE(3) object to a SE(3) matrix.
+
+        Args: 
+            x: SE3 matrix, numpy array, (4, 4) .
+    """
+    # return np.block([
+    #     [x.rotation(), x.translation().reshape(-1,1)],
+    #     [np.zeros((1,3)),1]
+    # ])
+    return x.transform()
+
+def se32manifse3( x ):
+    """ Converts a se(3) tangent vector, i.e. twist vector,
+        to a manif SE3Tangent object
+
+        Args: 
+            x: manif SE3Tangent object.
+    """
+    w = x[:3]
+    v = x[3:]
+    twist_mnf = np.concatenate((v,w))
+
+    return SE3Tangent(twist_mnf)
+
+def manifse32se3( x ):
+    """ Converts a manif SE3Tangent object to
+        a se(3) tangent vector, i.e. twist vector.
+
+        Args: 
+            x: se(3) tangent vector.
+    """
+    if type(x) == SE3Tangent:
+        x = x.coeffs()
+
+    v = x[:3]
+    w = x[3:]
+    twist = np.concatenate((w,v))
+
+    return twist
+
+# vec_SE32manifSE3 = jit(vmap(SE32manifSE3))
+
+def Jmnf2J( J ):
+    """ Reorder manif Jacobian on SE(3) to
+        conventional twist order Jacobian
+    """
+
+    J_v_v = J[:3,:3]
+    J_v_w = J[:3,3:]
+    J_w_v = J[3:,:3]
+    J_w_w = J[3:,3:]
+    return np.block([
+        [J_w_w, J_w_v],
+        [J_v_w, J_v_v]
+    ])
+
+def parallel_SE32manifSE3(q_ref):
+    # Use ThreadPoolExecutor for parallel processing
+    with ThreadPoolExecutor() as executor:
+        # Apply SE32manifSE3 conversion in parallel across each SE(3) matrix in q_ref
+        q_ref_manif = list(executor.map(SE32manifSE3, q_ref))
+    return q_ref_manif
