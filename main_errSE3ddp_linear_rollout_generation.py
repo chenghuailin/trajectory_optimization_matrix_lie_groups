@@ -1,12 +1,11 @@
-from traoptlibrary.traopt_controller import iLQR, iLQR_ErrorState_LinearRollout
+from traoptlibrary.traopt_controller import iLQR, iLQR_Generation_ErrorState_Approx_LinearRollout
 import numpy as np
 import jax
 import jax.numpy as jnp
 from jax import random
-from traoptlibrary.traopt_dynamics import ErrorStateSE3LinearRolloutAutoDiffDynamics, ErrorStateSE3NonlinearRolloutAutoDiffDynamics
-from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadratic2ndOrderAutodiffCost, AutoDiffCost
-from traoptlibrary.traopt_cost import ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost
-from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3, euler2quat, quat2rotm, vec_SE32quatpos
+from traoptlibrary.traopt_dynamics import ErrorStateSE3ApproxLinearRolloutDynamics, ErrorStateSE3ApproxNonlinearRolloutDynamics
+from traoptlibrary.traopt_cost import ErrorStateSE3ApproxGenerationQuadraticAutodiffCost
+from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, euler2quat, quat2rotm, vec_SE32quatpos
 from scipy.linalg import expm, logm
 from pyquaternion import Quaternion
 import matplotlib.pyplot as plt
@@ -114,7 +113,7 @@ debug_dyn = {"vel_zero": False, "derivative_compare": False}
 # Dynamics Instantiation
 # =====================================================
 
-dynamics = ErrorStateSE3LinearRolloutAutoDiffDynamics(J, q_ref, xi_ref, dt, 
+dynamics = ErrorStateSE3ApproxLinearRolloutDynamics(J, q_ref, xi_ref, dt, 
                                                       hessians=HESSIANS, 
                                                       debug=debug_dyn,
                                                       autodiff_dyn=False)
@@ -128,7 +127,7 @@ Q = np.identity(6) * 1
 P = np.identity(6) * 1e5
 R = np.identity(6) * 1e1
 
-cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goal)
+cost = ErrorStateSE3ApproxGenerationQuadraticAutodiffCost( Q,R,P, X_ref, q_goal)
 
 # =====================================================
 # Solver Instantiation
@@ -136,8 +135,8 @@ cost = ErrorStateSE3GenerationQuadratic1stOrderAutodiffCost( Q,R,P, X_ref, q_goa
 
 us_init = np.zeros((N, action_size,))
 
-ilqr = iLQR_ErrorState_LinearRollout(dynamics, cost, N, 
-                                hessians=HESSIANS)
+ilqr = iLQR_Generation_ErrorState_Approx_LinearRollout(dynamics, cost, N, 
+                                                        hessians=HESSIANS)
 
 xs_ilqr, us_ilqr, qs_ilqr, J_hist_ilqr, \
     xs_hist_ilqr, us_hist_ilqr, \
@@ -200,9 +199,9 @@ ax1.quiver(pos_goal[0], pos_goal[1], pos_goal[2],
            goal_vector[0], goal_vector[1], goal_vector[2], 
            color='r', label='Goal Vector')
 
-nonlinear_dynamics = ErrorStateSE3NonlinearRolloutAutoDiffDynamics(J, us_ilqr, q0_ref, 
-                                                         xid_ref, dt, hessians=HESSIANS, 
-                                                         debug=debug_dyn)
+nonlinear_dynamics = ErrorStateSE3ApproxNonlinearRolloutDynamics(J, us_ilqr, q0_ref, 
+                                                                xid_ref, dt, hessians=HESSIANS, 
+                                                                debug=debug_dyn)
 
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, interval_plot):  
