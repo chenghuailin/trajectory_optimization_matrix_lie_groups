@@ -678,7 +678,7 @@ class iLQR_Tracking_SE3(BaseController):
                 break
 
             if not accepted:
-                warnings.warn("Problem infeasible, regularization and line search step exhausted")
+                warnings.warn("Couldn't find descent direction, regularization and line search step exhausted")
                 break
 
         # Store fit parameters.

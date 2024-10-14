@@ -576,19 +576,6 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         self._R = R
         self._P = P
 
-        # self._l = jit(self._l)
-
-        # self._l_x = jit(jacfwd(self._l))
-        # self._l_u = jit(jacfwd(self._l, argnums=1))
-
-        # self._l_xx = jit(hessian(self._l, argnums=0))
-        # self._l_ux = jit(jacfwd( jacfwd(self._l, argnums=1) ))
-        # self._l_uu = jit(hessian(self._l, argnums=1))
-
-        # self._l_terminal = jit(self._l_terminal)
-        # self._l_x_terminal = jit(jacfwd(self._l_terminal))
-        # self._l_xx_terminal = jit(hessian(self._l_terminal))
-
         super(ErrorStateSE3TrackingQuadraticGaussNewtonCost, self).__init__()
 
     @property

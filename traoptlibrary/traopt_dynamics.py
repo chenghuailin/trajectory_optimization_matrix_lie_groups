@@ -7,6 +7,7 @@ from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint, se3_hat, \
             SE32quatpos, SE32manifSE3, se32manifse3, Jmnf2J
 from jax.scipy.linalg import expm
 from scipy.linalg import logm
+import scipy
 
 class BaseDynamics():
 
@@ -314,7 +315,8 @@ class SE3Dynamics(BaseDynamics):
 
         self._integration_method = integration_method
         if integration_method == "euler":
-            self._f = jit(self.fd_euler)
+            # self._f = jit(self.fd_euler)
+            self._f = self.fd_euler
         elif integration_method == "rk4":
             # self._f = jit(self.fd_rk4)
             raise ValueError("RK4 not implemented yet.")
@@ -397,7 +399,7 @@ class SE3Dynamics(BaseDynamics):
         q, xi = x 
 
         # TODO: decide if rewriting into manif or reordering xi is needed
-        q_dot = q @ expm( se3_hat(xi))
+        q_dot = q @ scipy.linalg.expm( se3_hat(xi))
         xi_dot =  self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + u )
         
         return [q_dot, xi_dot]
@@ -419,7 +421,7 @@ class SE3Dynamics(BaseDynamics):
         xi = xi.reshape(self.vel_state_size, 1)
         u = u.reshape(self.action_size, 1)
 
-        q_next = q @ expm( se3_hat(xi) * self.dt )
+        q_next = q @ scipy.linalg.expm( se3_hat(xi) * self.dt )
         xi_next = xi + self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + u ) * self.dt  
 
         return [q_next, xi_next.reshape(self.vel_state_size,)]
