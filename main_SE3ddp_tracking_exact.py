@@ -91,10 +91,6 @@ debug_dyn = {"vel_zero": False}
 # Dynamics Instantiation
 # =====================================================
 
-# dynamics = ErrorStateSE3ApproxLinearRolloutDynamics(J, q_ref, xi_ref, dt, 
-#                                                       hessians=HESSIANS, 
-#                                                       debug=debug_dyn,
-#                                                       autodiff_dyn=True)
 print("Dynamics Instatiation")
 dynamics = SE3Dynamics(J, dt, hessians=HESSIANS, debug=debug_dyn)
 print("Dynamics Instatiation Finished")
@@ -118,7 +114,6 @@ R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
 start_time = time.time() 
-# cost = ErrorStateSE3ApproxTrackingQuadraticAutodiffCost( Q, R, P, xi_ref )
 cost = ErrorStateSE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref)
 end_time = time.time() 
 print("Cost Instantiation Finished")
@@ -136,15 +131,11 @@ w0 = np.array([0., 0., 0.1])
 v0 = np.array([0.1, 0.1, 0.1])
 xi0 = np.concatenate((w0, v0))
 
-# x0 = np.concatenate(( se3_vee(logm( np.linalg.inv(q0_ref) @ q0 )), w0, v0))
 x0 = [ q0, xi0 ]
 print(x0)
 
 us_init = np.zeros((N, action_size,))
 
-# ilqr = iLQR_Tracking_ErrorState_Approx(dynamics, cost, N, 
-#                                         hessians=HESSIANS,
-#                                         rollout='linear')
 ilqr = iLQR_Tracking_SE3(dynamics, cost, N, 
                             hessians=HESSIANS,
                             rollout='nonlinear')
@@ -158,17 +149,8 @@ xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
 # =====================================================
 
 fig1 = plt.figure(1)
-# ax1 = fig1.add_subplot(121)
-# ax2 = fig1.add_subplot(122)
 ax2 = fig1.add_subplot(111)
 
-# for j in range( state_size ):
-#     ax1.plot( xs_ilqr[:,j], label = 'State '+str(j) )
-# ax1.set_title('iLQR Final Trajectory')
-# ax1.set_xlabel('TimeStep')
-# ax1.set_ylabel('State')
-# ax1.legend()
-# ax1.grid()
 
 for j in range( action_size ):
     ax2.plot( us_ilqr[:,j], label = 'Input '+str(j) )
@@ -240,21 +222,6 @@ for i in range(0, Nsim + 1, interval_plot):
     ax1.quiver(position[0], position[1], position[2],
               rotated_vector[0], rotated_vector[1], rotated_vector[2],
               color='r', length=1, label='Final Configuration' if i == 0 else '')
-    
-    # =========== 3. Plot the nonlinear rollout trajectory ===========
-
-    # se3_matrix = nonlinear_dynamics.q_ref[i]
-
-    # rot_matrix = se3_matrix[:3,:3]
-    # rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
-    
-    # # Extract the position 
-    # position = se3_matrix[:3, 3]
-
-    # # Plot the rotated vector
-    # ax1.quiver(position[0], position[1], position[2],
-    #         rotated_vector[0], rotated_vector[1], rotated_vector[2],
-    #         color='c', length=1, label='Nonlinear Rollout' if i == 0 else '')
 
 
 # Set the limits for the axes
