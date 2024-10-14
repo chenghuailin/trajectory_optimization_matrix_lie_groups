@@ -2,6 +2,7 @@ from traoptlibrary.traopt_controller import iLQR_Tracking_ErrorState_Approx, iLQ
 import numpy as np
 import jax
 import jax.numpy as jnp
+# import numpy as jnp
 from jax import random
 from traoptlibrary.traopt_dynamics import ErrorStateSE3ApproxLinearRolloutDynamics, \
     ErrorStateSE3ApproxNonlinearRolloutDynamics, SE3Dynamics
