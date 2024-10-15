@@ -4,7 +4,8 @@ import numpy as np
 import jax.numpy as jnp
 import time
 from jax import jit
-from traoptlibrary.traopt_utilis import is_pos_def, vec_SE32quatpos, se3_vee, se3_hat, SE32manifSE3
+from traoptlibrary.traopt_utilis import is_pos_def, vec_SE32quatpos, se3_vee,\
+        se3_hat, SE32manifSE3, manifse32se3
 from scipy.linalg import logm, inv, expm
 
 class BaseController():
@@ -712,12 +713,12 @@ class iLQR_Tracking_SE3(BaseController):
             q_new, xi_new = xs_new[i]
             q, xi = xs[i]
 
-            dq = se3_vee(logm(np.linalg.inv( q ) @ q_new ))
+            # dq = se3_vee(logm(np.linalg.inv( q ) @ q_new ))
 
             # TODO:
-            # q1 = SE32manifSE3(q_new)
-            # q2 = SE32manifSE3(q)
-            # dq = (q1 - q2).coeffs()
+            q_new_mnf = SE32manifSE3(q_new)
+            q_mnf = SE32manifSE3(q)
+            dq = manifse32se3( q_new_mnf - q_mnf )
 
             dxi = xi_new - xi
 

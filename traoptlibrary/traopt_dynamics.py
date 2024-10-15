@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import jax
 from jax import jacfwd, hessian, jit
 from traoptlibrary.traopt_utilis import skew, adjoint, coadjoint, se3_hat, \
-            SE32quatpos, SE32manifSE3, se32manifse3, Jmnf2J
+            SE32quatpos, SE32manifSE3, se32manifse3, Jmnf2J, manifSE32SE3
 from jax.scipy.linalg import expm
 from scipy.linalg import logm
 import scipy
@@ -418,10 +418,14 @@ class SE3Dynamics(BaseDynamics):
         """
 
         q, xi = x 
+        q_mnf = SE32manifSE3(q)
+        xi_mnf = se32manifse3(xi)
+
         xi = xi.reshape(self.vel_state_size, 1)
         u = u.reshape(self.action_size, 1)
 
-        q_next = q @ scipy.linalg.expm( se3_hat(xi) * self.dt )
+        q_next = manifSE32SE3( q_mnf.rplus(xi_mnf * self.dt) ) 
+        # q_next = q @ scipy.linalg.expm( se3_hat(xi) * self.dt )
         xi_next = xi + self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + u ) * self.dt  
 
         return [q_next, xi_next.reshape(self.vel_state_size,)]
