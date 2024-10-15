@@ -714,7 +714,8 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         xi_ref = self._xi_ref[i]
 
         J_e_x = np.empty((6,6))
-        err = manifse32se3(q.rminus(q_ref, J_e_x)).reshape(6,1)
+        # err = manifse32se3(q.rminus(q_ref, J_e_x)).reshape(6,1)
+        err = manifse32se3(q.lminus(q_ref, J_e_x)).reshape(6,1)
         J_e_x = Jmnf2J(J_e_x)
         J_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ err
 
@@ -757,7 +758,8 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         q_ref = self._q_ref[i] 
 
         J_e_x = np.empty((6,6))
-        _ = q.rminus(q_ref, J_e_x)
+        # _ = q.rminus(q_ref, J_e_x)
+        _ = q.lminus(q_ref, J_e_x)
         J_e_x = Jmnf2J(J_e_x)
         H_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ J_e_x
 
