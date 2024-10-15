@@ -1,8 +1,9 @@
 import numpy as np
 from jax import vmap, jit
+
 # import jax.numpy as jnp
 import numpy as jnp
-import jax.lax as lax
+
 from jax.numpy.linalg import norm
 from pyquaternion import Quaternion
 from manifpy import SE3, SE3Tangent
@@ -315,7 +316,8 @@ def SE32manifSE3( x ):
     """
     quatpos = SE32quatpos(x)
     pos = quatpos[4:].reshape(3,1)
-    quat = quatpos[:4].reshape(4,1)
+    q0,q1,q2,q3 = quatpos[:4]
+    quat = np.array([q1,q2,q3,q0])
     # return pos, quat
     return SE3(position=pos, quaternion=quat)
 
