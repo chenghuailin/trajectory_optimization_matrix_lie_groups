@@ -2,12 +2,13 @@ import cProfile
 import pstats
 import os
 from datetime import datetime
+import runpy
 
 # Create a profiler object
 profiler = cProfile.Profile()
 
 # Run the file you want to profile
-profiler.run('runpy.run_path("main_SE3ddp_tracking.py")')
+profiler.run('runpy.run_path("main_SE3ddp_tracking_exact.py")')
 
 # Specify the output directory and ensure it exists
 output_dir = 'ProfileReports'
@@ -18,7 +19,7 @@ if not os.path.exists(output_dir):
 current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 # Define the output file path with timestamp
-output_file = os.path.join(output_dir, f'ProfileReport_{current_time}.txt')
+output_file = os.path.join(output_dir, f'ProfileReport_{current_time}')
 
 # Save the profiling results to a file
 with open(output_file, 'w') as f:

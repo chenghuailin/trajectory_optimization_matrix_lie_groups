@@ -1,13 +1,9 @@
-from traoptlibrary.traopt_controller import iLQR_Tracking_ErrorState_Approx, iLQR_Tracking_SE3
-import numpy as np
 import jax
-import jax.numpy as jnp
-# import numpy as jnp
+from traoptlibrary.traopt_controller import iLQR_Tracking_SE3
+import numpy as np
 from jax import random
-from traoptlibrary.traopt_dynamics import ErrorStateSE3ApproxLinearRolloutDynamics, \
-    ErrorStateSE3ApproxNonlinearRolloutDynamics, SE3Dynamics
-from traoptlibrary.traopt_cost import ErrorStateSE3ApproxTrackingQuadraticAutodiffCost,\
-    ErrorStateSE3TrackingQuadraticGaussNewtonCost
+from traoptlibrary.traopt_dynamics import SE3Dynamics
+from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3
 from scipy.linalg import expm, logm
 import matplotlib.pyplot as plt
@@ -26,8 +22,8 @@ key = random.key(seed)
 jax.config.update("jax_enable_x64", True)
 
 dt = 0.01
-# Nsim = 1400   # Simulation horizon
-Nsim = 400   
+Nsim = 1400   # Simulation horizon
+# Nsim = 400   
 
 # ====================
 # Inertia Matrix
@@ -100,7 +96,6 @@ print("Dynamics Instatiation Finished")
 # =====================================================
 
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
-# (The same as the Sangli's paper)
 
 Q = np.diag([ 
     10., 10., 10., 1., 1., 1.,
@@ -183,12 +178,6 @@ ax1 = fig1.add_subplot(111, projection='3d')
 # Define an initial vector and plot on figure
 initial_vector = np.array([1, 0, 0])  # Example initial vector
 ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
-
-# Nonlinear rollout for validation
-nonlinear_dynamics = ErrorStateSE3ApproxNonlinearRolloutDynamics(J, us_ilqr, q0, xi0, 
-                                                            dt, hessians=HESSIANS, 
-                                                            debug=debug_dyn)
-
 
 # Loop through quaternion data to plot rotated vectors
 for i in range(0, Nsim + 1, interval_plot):  
