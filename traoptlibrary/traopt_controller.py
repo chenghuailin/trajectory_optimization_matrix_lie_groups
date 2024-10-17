@@ -603,6 +603,11 @@ class iLQR_Tracking_SE3(BaseController):
 
         changed = True
         converged = False
+
+        xs = self._init_rollout( x0, us )
+        xs_hist.append(xs.copy())
+        us_hist.append(us.copy())
+
         for iteration in range(n_iterations):
             accepted = False
             
@@ -610,15 +615,10 @@ class iLQR_Tracking_SE3(BaseController):
             time_calc = end_time - start_time
             print("Start Iteration:", iteration, ", Used Time:", time_calc )
 
-            # Forward rollout only if it needs to be recomputed.
             if changed:
-                (xs, F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
-                    L_uu, F_xx, F_ux, F_uu) = self._linearization(x0, us)
-                print("Iteration:", iteration, "Out of ._linearization function")
+                (F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
+                    L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
                 J_opt = L.sum()
-                if len(xs_hist) == 0 and len(us_hist) == 0 :
-                    xs_hist.append(xs.copy())
-                    us_hist.append(us.copy())
                 changed = False
 
                 _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
@@ -687,6 +687,21 @@ class iLQR_Tracking_SE3(BaseController):
         self._K = K
 
         return xs, us, J_hist, xs_hist, us_hist
+    
+    def _init_rollout(self, x0, us):
+        """ Initially rollout a dynamically feasible trajectory.
+
+        Args:
+            x0: initial state, [q0, vel0]
+
+        Returns:
+            xs: initial states trajectory
+        """
+        xs = [None] * (self.N + 1)
+        xs[0] = x0
+        for i in range(self.N):
+            xs[i+1] = self.dynamics.f(xs[i], us[i], i)
+        return xs
 
     def _rollout(self, xs, us, k, K, F_x, F_u, alpha=1.0):
         """Applies the controls for a given trajectory.
@@ -759,12 +774,12 @@ class iLQR_Tracking_SE3(BaseController):
                                                      range(self.N)))
         return sum(J) + self.cost.l(xs[-1], None, self.N, terminal=True)
 
-    def _linearization(self, x0, us):
+    def _linearization(self, xs, us):
         """Apply the forward dynamics to have a trajectory from the starting
         state x0 by applying the control path us.
 
         Args:
-            x0: Initial state [state_size].
+            xs: Nominal state trajectory [N+1, [q, vel]].
             us: Control path [N, action_size].
 
         Returns:
@@ -794,9 +809,6 @@ class iLQR_Tracking_SE3(BaseController):
         action_size = self.dynamics.action_size
         N = us.shape[0]
 
-        qs = np.empty((N + 1, 4, 4))
-        xis = np.empty((N + 1, 6,))
-        xs = []
         F_x = np.empty((N, state_size, state_size))
         F_u = np.empty((N, state_size, action_size))
 
@@ -815,16 +827,10 @@ class iLQR_Tracking_SE3(BaseController):
         L_xx = np.empty((N + 1, state_size, state_size))
         L_ux = np.empty((N, action_size, state_size))
         L_uu = np.empty((N, action_size, action_size))
-     
-        qs[0], xis[0] = x0
-        xs.append([qs[0], xis[0]])
 
         for i in range(N):
-            x = [ qs[i], xis[i] ]
+            x = xs[i]
             u = us[i]
-
-            qs[i+1], xis[i+1] = self.dynamics.f(x, u, i)
-            xs.append([qs[i + 1], xis[i + 1]])
 
             F_x[i] = self.dynamics.f_x(x, u, i)
             F_u[i] = self.dynamics.f_u(x, u, i)                     
@@ -841,12 +847,12 @@ class iLQR_Tracking_SE3(BaseController):
                 F_ux[i] = self.dynamics.f_ux(x, u, i)
                 F_uu[i] = self.dynamics.f_uu(x, u, i)
 
-        x = [ qs[-1], xis[-1] ]
+        x = xs[-1]
         L[-1] = self.cost.l(x, None, N, terminal=True)
         L_x[-1] = self.cost.l_x(x, None, N, terminal=True)
         L_xx[-1] = self.cost.l_xx(x, None, N, terminal=True)
 
-        return xs, F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
+        return F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
 
     def _backward_pass(self,
                        F_x,
