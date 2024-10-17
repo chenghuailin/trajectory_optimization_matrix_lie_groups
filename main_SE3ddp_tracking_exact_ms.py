@@ -1,5 +1,5 @@
 import jax
-from traoptlibrary.traopt_controller import iLQR_Tracking_SE3
+from traoptlibrary.traopt_controller import iLQR_Tracking_SE3_MS
 import numpy as np
 from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
@@ -131,7 +131,8 @@ print(x0)
 
 us_init = np.zeros((N, action_size,))
 
-ilqr = iLQR_Tracking_SE3(dynamics, cost, N, 
+ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N, 
+                            q_ref, xi_ref, 
                             hessians=HESSIANS,
                             rollout='linear')
 
