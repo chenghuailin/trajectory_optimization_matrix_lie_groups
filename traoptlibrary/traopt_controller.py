@@ -1083,7 +1083,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
 
-        super(iLQR_Tracking_SE3, self).__init__()
+        super(iLQR_Tracking_SE3_MS, self).__init__()
 
     @property
     def xi_ref(self):
@@ -1182,7 +1182,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
                 # Backtracking line search.
                 for alpha in alphas:
-                    xs_new, us_new = self._rollout(xs, us, k, K, F_x, F_u, alpha)
+                    xs_new, us_new = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
                     J_new = self._trajectory_cost(xs_new, us_new)
 
                     end_time = time.perf_counter()
@@ -1225,7 +1225,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         return xs, us, J_hist, xs_hist, us_hist
 
-    def _rollout(self, xs, us, k, K, F_x, F_u, alpha=1.0):
+    def _rollout(self, xs, us, k, K, d, F_x, F_u, alpha=1.0):
         """Applies the controls for a given trajectory.
 
         Args:
@@ -1249,35 +1249,43 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
             q_new, xi_new = xs_new[i]
             q, xi = xs[i]
+            q_next, xi_next = xs[i+1]
 
-            # dq = se3_vee(logm(np.linalg.inv( q ) @ q_new ))
-
-            # TODO:
             q_new_mnf = SE32manifSE3(q_new)
             q_mnf = SE32manifSE3(q)
-            dq = manifse32se3( q_new_mnf - q_mnf )
+            q_err = manifse32se3( q_new_mnf - q_mnf )
 
-            dxi = xi_new - xi
+            xi_err = xi_new - xi
 
-            xs_err = np.concatenate((dq,dxi))
-
+            xs_err = np.concatenate((q_err, xi_err))
             us_err = alpha * k[i] + K[i].dot(xs_err)
-            
             us_new[i] = us[i] + us_err
 
-            if self._rollout_mode == 'linear':
+            if self._rollout_mode == 'nonlinear':
 
-                q_next = manifSE32SE3( q_mnf + se32manifse3(F_x[i,:6,:] @ xs_err + F_u[i,:6,:] @ us_err) )
-                xi_next = xi + F_x[i,6:,:] @ xs_err + F_u[i,6:,:] @ us_err
+                dq_mnf = se32manifse3(d[i,:6])
+                dxi = d[i,6:]
 
-            elif self._rollout_mode == 'nonlinear':
-
-                q_next, xi_next = self.dynamics.f( 
+                fq_new, fxi_new = self.dynamics.f( 
                     [ q_new, xi_new ],
                     us_new[i],
                     i
                 )
-                xs_new[i + 1] = [q_next, xi_next].copy()
+                fq, fxi = self.dynamics.f( 
+                    [ q, xi ],
+                    us[i],
+                    i
+                )
+
+                fq_new_mnf = SE32manifSE3( fq_new )
+                fq_mnf = SE32manifSE3( fq )
+
+                q_next_new = manifSE32SE3( 
+                    SE32manifSE3(q_next) * (alpha * dq_mnf).exp() * fq_mnf.inverse() * fq_new_mnf 
+                )
+                xi_next_new = xi_next + fxi_new - fxi + alpha * dxi
+
+                xs_new[i+1] = [ q_next_new, xi_next_new ]
                 
         return xs_new, us_new
 
@@ -1355,10 +1363,10 @@ class iLQR_Tracking_SE3_MS(BaseController):
             u = us[i]
 
             d_q = manifse32se3( 
-                SE32manifSE3(x_next[0]) - SE32manifSE3(self.dynamics.f(x, u, i)[0])
+                SE32manifSE3(self.dynamics.f(x, u, i)[0]) - SE32manifSE3(x_next[0])
             )
             d_xi = x_next[1] - self.dynamics.f(x, u, i)[1]
-            d[i] = np.vstack(
+            d[i] = np.concatenate(
                 ( d_q, d_xi )
             )
 

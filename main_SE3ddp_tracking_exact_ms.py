@@ -134,7 +134,7 @@ us_init = np.zeros((N, action_size,))
 ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N, 
                             q_ref, xi_ref, 
                             hessians=HESSIANS,
-                            rollout='linear')
+                            rollout='nonlinear')
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
