@@ -632,7 +632,8 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         xi_ref = self._xi_ref[i]
 
         # Compute the logarithmic map of the pose error.
-        q_err = q.rminus( q_ref ).coeffs()
+        # q_err = q.rminus( q_ref ).coeffs()
+        q_err = q.lminus( q_ref ).coeffs()
         # q_err = se3_vee(logm(np.linalg.inv( q_ref.transformation() ) @ q ))
         q_err = manifse32se3( q_err ).reshape(6,1)
         q_cost = q_err.T @ self._Q[:self._error_state_size, :self._error_state_size] @ q_err
@@ -666,7 +667,8 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         xi_ref = self._xi_ref[i]
 
         # Compute the logarithmic map of the pose error.
-        q_err = q.rminus( q_ref ).coeffs()
+        # q_err = q.rminus( q_ref ).coeffs()
+        q_err = q.lminus( q_ref ).coeffs()
         q_err = manifse32se3(q_err).reshape(6,1)
         q_cost = q_err.T @ self._Q[:self._error_state_size, :self._error_state_size] @ q_err
 
