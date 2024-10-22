@@ -253,312 +253,222 @@ ax1.set_zlabel('Z')
 # =====================================================
 
 import matplotlib.animation as animation
-from mpl_toolkits.mplot3d import Axes3D  # Ensure 3D plotting is enabled
+from mpl_toolkits.mplot3d import Axes3D  # Enable 3D plotting
 from matplotlib.widgets import Button
+from matplotlib.lines import Line2D
 
 # Extract positions from the reference and final trajectories
 ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
 final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory positions (Nsim+1, 3)
 
-# Define the frame interval and total frames for smoother animation
-frame_interval = 5  # Adjust as needed for smoother or faster animation
+# Define frame interval for smoother animation
+frame_interval = 5
 frames = range(0, Nsim + 1, frame_interval)
 
-# Initialize the plot
-fig_anim = plt.figure(figsize=(12, 8))
-ax_anim = fig_anim.add_subplot(111, projection='3d')
+# Initialize the figure and subplots
+fig_anim = plt.figure(figsize=(14, 6))
+ax_anim_err = fig_anim.add_subplot(121, projection='3d')
+ax_anim_traj = fig_anim.add_subplot(122, projection='3d')
 
-# Plot the reference trajectory as a static blue line
-ax_anim.plot(ref_positions[:, 0], ref_positions[:, 1], ref_positions[:, 2],
-            label='Reference Trajectory', color='blue', linewidth=2)
+# Plot the static reference trajectory
+ax_anim_traj.plot(ref_positions[:, 0], ref_positions[:, 1], ref_positions[:, 2],
+                 label='Reference Trajectory', color='blue', linewidth=2)
 
-# Initialize the final trajectory line (to be updated in animation)
-final_traj_line, = ax_anim.plot([], [], [], label='Final Trajectory', color='red', linewidth=2)
+# Initialize the final trajectory line
+final_traj_line, = ax_anim_traj.plot([], [], [], label='Final Trajectory', color='red', linewidth=2)
 
-# Initialize orientation vectors (quivers) for both reference and final trajectories
-initial_vector = np.array([1, 0, 0])  # Example initial vector for orientation
+# Define an initial vector for orientation
+initial_vector = np.array([1, 0, 0])
 
-ref_quiver = None    # Quiver for reference trajectory's current orientation
-final_quiver = None  # Quiver for final trajectory's current orientation
+# Initialize quivers and points
+ref_quiver = None
+final_quiver = None
+ref_point, = ax_anim_traj.plot([], [], [], 'o', color='blue', label='Reference Position')
+final_point, = ax_anim_traj.plot([], [], [], 'o', color='red', label='Final Position')
 
-# Initialize current position markers (optional)
-ref_point, = ax_anim.plot([], [], [], 'o', color='blue', label='Reference Position')
-final_point, = ax_anim.plot([], [], [], 'o', color='red', label='Final Position')
-
-# Set plot limits based on the reference and final trajectories
+# Set plot limits based on trajectories
 all_positions = np.vstack((ref_positions, final_positions))
-max_range = np.array([all_positions[:, 0].max()-all_positions[:, 0].min(),
-                      all_positions[:, 1].max()-all_positions[:, 1].min(),
-                      all_positions[:, 2].max()-all_positions[:, 2].min()]).max() / 2.0
+max_range = (all_positions.max(axis=0) - all_positions.min(axis=0)).max() / 2.0
+mid_points = (all_positions.max(axis=0) + all_positions.min(axis=0)) * 0.5
 
-mid_x = (all_positions[:, 0].max()+all_positions[:, 0].min()) * 0.5
-mid_y = (all_positions[:, 1].max()+all_positions[:, 1].min()) * 0.5
-mid_z = (all_positions[:, 2].max()+all_positions[:, 2].min()) * 0.5
-
-ax_anim.set_xlim(mid_x - max_range, mid_x + max_range)
-ax_anim.set_ylim(mid_y - max_range, mid_y + max_range)
-ax_anim.set_zlim(mid_z - max_range, mid_z + max_range)
+ax_anim_traj.set_xlim(mid_points[0] - max_range, mid_points[0] + max_range)
+ax_anim_traj.set_ylim(mid_points[1] - max_range, mid_points[1] + max_range)
+ax_anim_traj.set_zlim(mid_points[2] - max_range, mid_points[2] + max_range)
 
 # Set labels and title
-ax_anim.set_xlabel('X')
-ax_anim.set_ylabel('Y')
-ax_anim.set_zlabel('Z')
-ax_anim.set_title('Final Trajectory Animation with Reference')
-ax_anim.grid()
+ax_anim_traj.set_xlabel('X')
+ax_anim_traj.set_ylabel('Y')
+ax_anim_traj.set_zlabel('Z')
+ax_anim_traj.set_title('Final Trajectory Animation with Reference')
+ax_anim_traj.grid()
 
-# Create proxy artists for the legend to avoid duplicate entries
-from matplotlib.lines import Line2D
-# legend_elements = [
-#     Line2D([0], [0], color='blue', lw=2, label='Reference Trajectory'),
-#     Line2D([0], [0], color='red', lw=2, label='Final Trajectory'),
-#     Line2D([0], [0], marker='o', color='w', label='Reference Position',
-#            markerfacecolor='blue', markersize=8),
-#     Line2D([0], [0], marker='o', color='w', label='Final Position',
-#            markerfacecolor='red', markersize=8),
-#     Line2D([0], [0], color='blue', lw=2, label='Reference Orientation'),
-#     Line2D([0], [0], color='red', lw=2, label='Final Orientation'),
-# ]
+# Create legend
 legend_elements = [
     Line2D([0], [0], color='blue', lw=2, label='Reference Trajectory'),
     Line2D([0], [0], color='red', lw=2, label='Final Trajectory')
 ]
-ax_anim.legend(handles=legend_elements)
+ax_anim_traj.legend(handles=legend_elements)
 
-def init_anim():
-    """
-    Initialize the animation by clearing the final trajectory line and current points.
-    Also, remove any existing quivers.
-    """
-    final_traj_line.set_data([], [])
-    final_traj_line.set_3d_properties([])
-    
-    ref_point.set_data([], [])
-    ref_point.set_3d_properties([])
-    
-    final_point.set_data([], [])
-    final_point.set_3d_properties([])
-    
-    global ref_quiver, final_quiver
-    if ref_quiver:
-        ref_quiver.remove()
-        ref_quiver = None
-    if final_quiver:
-        final_quiver.remove()
-        final_quiver = None
-    
-    return final_traj_line, ref_point, final_point
+# Initialize error trajectory plot
+lim = 1  # Axis display range
+ax_anim_err.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2],
+                  color='blue', length=1, normalize=True, label='Reference Vector')
+stage_text = ax_anim_err.text2D(0.05, 0.95, "", transform=ax_anim_err.transAxes, fontsize=12)
+
+# Set limits and labels for error plot
+ax_anim_err.set_xlim([-lim, lim])
+ax_anim_err.set_ylim([-lim, lim])
+ax_anim_err.set_zlim([-lim, lim])
+ax_anim_err.set_xlabel('X')
+ax_anim_err.set_ylabel('Y')
+ax_anim_err.set_zlabel('Z')
+ax_anim_err.set_title('Error Trajectory Animation')
+ax_anim_err.grid()
+ax_anim_err.legend()
+
+# Initialize error quivers list
+error_quivers = []
+
+# Control variables for animation
+current_frame = 0
+is_paused = False
 
 def update_anim(frame):
-    """
-    Update function for the animation.
-    - Updates the final trajectory line up to the current frame.
-    - Updates the orientation quivers for both reference and final trajectories.
-    - Updates the current position markers.
-    """
-    global ref_quiver, final_quiver, final_current_frame
+    """Update function for the animation."""
+    global ref_quiver, final_quiver, current_frame
     
-    # Update the final trajectory line
+    # Update final trajectory line
     traj = final_positions[:frame + 1]
     final_traj_line.set_data(traj[:, 0], traj[:, 1])
     final_traj_line.set_3d_properties(traj[:, 2])
 
-    # Update current position markers
-    final_position = traj[-1]
-    final_point.set_data(final_position[0], final_position[1])
-    final_point.set_3d_properties(final_position[2])
+    # Update position markers
+    final_pos = traj[-1]
+    final_point.set_data(final_pos[0], final_pos[1])
+    final_point.set_3d_properties(final_pos[2])
     
-    # Update reference position marker
-    ref_position = ref_positions[frame]
-    ref_point.set_data(ref_position[0], ref_position[1])
-    ref_point.set_3d_properties(ref_position[2])
+    ref_pos = ref_positions[frame]
+    ref_point.set_data(ref_pos[0], ref_pos[1])
+    ref_point.set_3d_properties(ref_pos[2])
     
-    # Update the reference trajectory's orientation quiver
+    # Update reference quiver
     se3_ref = q_ref[frame]
     rot_ref = se3_ref[:3, :3]
-    rotated_ref_vector = rot_ref @ initial_vector
+    rotated_ref_vec = rot_ref @ initial_vector
     pos_ref = se3_ref[:3, 3]
     
-    # Remove previous reference quiver if it exists
     if ref_quiver:
         ref_quiver.remove()
-    
-    # Plot new reference quiver
-    ref_quiver = ax_anim.quiver(
+    ref_quiver = ax_anim_traj.quiver(
         pos_ref[0], pos_ref[1], pos_ref[2],
-        rotated_ref_vector[0], rotated_ref_vector[1], rotated_ref_vector[2],
+        rotated_ref_vec[0], rotated_ref_vec[1], rotated_ref_vec[2],
         color='blue', length=0.5, normalize=True
     )
     
-    # Update the final trajectory's orientation quiver
+    # Update final quiver
     se3_final = xs_ilqr[frame][0]
     rot_final = se3_final[:3, :3]
-    rotated_final_vector = rot_final @ initial_vector
+    rotated_final_vec = rot_final @ initial_vector
     pos_final = se3_final[:3, 3]
     
-    # Remove previous final quiver if it exists
     if final_quiver:
         final_quiver.remove()
-    
-    # Plot new final quiver
-    final_quiver = ax_anim.quiver(
+    final_quiver = ax_anim_traj.quiver(
         pos_final[0], pos_final[1], pos_final[2],
-        rotated_final_vector[0], rotated_final_vector[1], rotated_final_vector[2],
+        rotated_final_vec[0], rotated_final_vec[1], rotated_final_vec[2],
         color='red', length=0.5, normalize=True
     )
     
-    # Update the plot title to show the current frame
-    ax_anim.set_title(f'Final Trajectory Animation with Reference\nFrame: {frame}/{Nsim}')
+    # Update title with current frame
+    ax_anim_traj.set_title(f'Final Trajectory Animation with Reference\nFrame: {frame}/{Nsim}')
     
-    # Update the current frame
-    final_current_frame = frame
+    # ------------------------------------------------------------------
+
+    # Update error quivers
+    while error_quivers:
+        quiv = error_quivers.pop()
+        quiv.remove()
     
-    return final_traj_line, ref_quiver, final_quiver, ref_point, final_point
+    se3_error = (qref_ilqr_mnf[frame].inverse() * xs_ilqr_mnf[frame]).transform()
+    rot_error = se3_error[:3, :3]
+    rotated_error_vec = rot_error @ initial_vector
+    pos_error = se3_error[:3, 3]
+    
+    err_quiver = ax_anim_err.quiver(
+        pos_error[0], pos_error[1], pos_error[2],
+        rotated_error_vec[0], rotated_error_vec[1], rotated_error_vec[2],
+        color='red', length=1, normalize=True,
+        label='Error Trajectory' if frame == frames.start else ""
+    )
+    error_quivers.append(err_quiver)
+    
+    # Update stage annotation
+    stage_text.set_text(f'Frame: {frame}/{Nsim}')
+
+    # ------------------------------------------------------------------
+
+    # Update frame index
+    current_frame = frame
+    
+    return final_traj_line, ref_quiver, final_quiver, ref_point, final_point, err_quiver, stage_text
 
 # Create the animation
-ani_final_traj2 = animation.FuncAnimation(
-    fig_anim, update_anim, frames=frames,
-    init_func=init_anim, blit=False,
+ani_final_traj = animation.FuncAnimation(
+    fig_anim, 
+    update_anim, 
+    frames=frames,
+    blit=False,
     interval=30,  # Time between frames in milliseconds
     repeat=True    # Repeat the animation indefinitely
 )
 
-# Control variables for animation
-final_current_frame = 0
-final_is_paused = False
 
 # Add interactive buttons
 # Pause/Play Button
-ax_pause_final = plt.axes([0.7, 0.01, 0.1, 0.05])
-btn_pause_final = Button(ax_pause_final, 'Pause/Play')
+ax_pause = plt.axes([0.7, 0.01, 0.1, 0.05])
+btn_pause = Button(ax_pause, 'Pause/Play')
 
 # Previous Frame Button
-ax_prev_final = plt.axes([0.81, 0.01, 0.1, 0.05])
-btn_prev_final = Button(ax_prev_final, 'Previous')
+ax_prev = plt.axes([0.81, 0.01, 0.1, 0.05])
+btn_prev = Button(ax_prev, 'Previous')
 
 # Next Frame Button
-ax_next_final = plt.axes([0.59, 0.01, 0.1, 0.05])
-btn_next_final = Button(ax_next_final, 'Next')
+ax_next = plt.axes([0.59, 0.01, 0.1, 0.05])
+btn_next = Button(ax_next, 'Next')
 
-# Define button callback functions
-def toggle_pause_final(event):
-    global final_is_paused
-    if final_is_paused:
-        ani_final_traj2.event_source.start()
+def toggle_pause(event):
+    """Toggle pause/play of the animation."""
+    global is_paused
+    if is_paused:
+        ani_final_traj.event_source.start()
     else:
-        ani_final_traj2.event_source.stop()
-    final_is_paused = not final_is_paused
+        ani_final_traj.event_source.stop()
+    is_paused = not is_paused
 
-def prev_frame_final(event):
-    global final_current_frame
-    if final_current_frame > 0:
-        final_current_frame -= frame_interval
-        update_anim(final_current_frame)
+def prev_frame(event):
+    """Go to the previous frame."""
+    global current_frame
+    if current_frame > 0:
+        current_frame = max(0, current_frame - frame_interval)
+        update_anim(current_frame)
         plt.draw()
 
-def next_frame_final(event):
-    global final_current_frame
-    if final_current_frame < Nsim:
-        final_current_frame += frame_interval
-        update_anim(final_current_frame)
+def next_frame(event):
+    """Go to the next frame."""
+    global current_frame
+    if current_frame < Nsim:
+        current_frame = min(Nsim, current_frame + frame_interval)
+        update_anim(current_frame)
         plt.draw()
 
 # Connect buttons to their callback functions
-btn_pause_final.on_clicked(toggle_pause_final)
-btn_prev_final.on_clicked(prev_frame_final)
-btn_next_final.on_clicked(next_frame_final)
+btn_pause.on_clicked(toggle_pause)
+btn_prev.on_clicked(prev_frame)
+btn_next.on_clicked(next_frame)
 
-
-# =====================================================
-# Visualization Error with Vector as Animation
-# =====================================================
-import matplotlib.animation as animation
-
-# Set the sampling interval for frames
-interval_plot = max(int((Nsim + 1) / 200), 1)  # Adjust as needed
-lim = 1  # Axis display range
-
-# Initialize the plot
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
-
-# Define an initial vector
-initial_vector = np.array([1, 0, 0])  # Example initial vector
-
-# Plot the initial vector (green)
-initial_quiver = ax.quiver(
-    0, 0, 0,
-    initial_vector[0], initial_vector[1], initial_vector[2],
-    color='g', length=1, normalize=True, label='Initial Vector'
-)
-
-# Initialize annotation for the current stage
-stage_text = ax.text2D(0.05, 0.95, "", transform=ax.transAxes, fontsize=12)
-
-# Set the limits for the axes
-ax.set_xlim([-lim, lim])
-ax.set_ylim([-lim, lim])
-ax.set_zlim([-lim, lim])
-ax.set_xlabel('X')
-ax.set_ylabel('Y')
-ax.set_zlabel('Z')
-ax.set_title('Error Trajectory Animation')
-ax.legend()
-ax.grid()
-
-# Prepare frame indices for the animation
-indices = range(0, Nsim + 1, interval_plot) if interval_plot > 0 else range(Nsim + 1)
-
-# Initialize a list to store current error quivers
-error_quivers = []
-
-def update(num):
-    """
-    Update function for the animation.
-    Removes previous error quivers and plots the current error vector.
-    Updates the stage annotation.
-    """
-    # Remove existing error quivers
-    while error_quivers:
-        quiv = error_quivers.pop()
-        quiv.remove()
-
-    # Compute the error SE3 matrix
-    se3_matrix = (qref_ilqr_mnf[num].inverse() * xs_ilqr_mnf[num]).transform()
-
-    # Extract rotation matrix and position vector
-    rot_matrix = se3_matrix[:3, :3]
-    rotated_vector = rot_matrix @ initial_vector  # Apply rotation to the initial vector
-    position = se3_matrix[:3, 3]
-
-    # Plot the error trajectory vector (red)
-    err_quiver = ax.quiver(
-        position[0], position[1], position[2],
-        rotated_vector[0], rotated_vector[1], rotated_vector[2],
-        color='r', length=1, normalize=True,
-        label='Error Trajectory' if num == indices.start else ""
-    )
-    error_quivers.append(err_quiver)
-
-    # Update stage annotation
-    stage_text.set_text(f'Stage: {num}/{Nsim}')
-
-    return error_quivers + [stage_text]
-
-# Create the animation
-ani = animation.FuncAnimation(
-    fig, update, frames=indices,
-    interval=100,  
-    blit=False,
-    repeat_delay=500,
-    repeat=True 
-)
-
-# Optional: Save the animation as a video file
-# ani.save('error_trajectory_animation.mp4', writer='ffmpeg', fps=10)
 
 # # =====================================================
-# # Plotting
+# # Plotting Display
 # # =====================================================
 
-# Display the plot
 plt.show()
