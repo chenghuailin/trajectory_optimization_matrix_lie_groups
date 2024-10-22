@@ -3,11 +3,11 @@ from jax import vmap, jit
 
 # import jax.numpy as jnp
 import numpy as jnp
-
 from jax.numpy.linalg import norm
 from pyquaternion import Quaternion
 from manifpy import SE3, SE3Tangent
 from concurrent.futures import ThreadPoolExecutor
+from scipy.spatial.transform import Rotation
 
 def skew( w ):
     """Get the isomorphic element in the Lie algebra for SO3, 
@@ -165,7 +165,54 @@ def quat2rotm(quat):
 
 #     return q
 
-def rotm2quat(R:np.ndarray) -> np.ndarray:
+# def rotm2quat(R:np.ndarray) -> np.ndarray:
+#     """Creates a quaternion from a rotation matrix defining a given orientation.
+    
+#     Parameters
+#     ----------
+#     R : [3x3] np.ndarray
+#         Rotation matrix
+            
+#     Returns
+#     -------
+#     q : [4x1] np.ndarray
+#         quaternion defining the orientation    
+#     """    
+#     u_q0 = np.sqrt((1 + R[0,0] + R[1,1] + R[2,2])/4) # the prefix u_ means unsigned
+#     u_q1 = np.sqrt((1 + R[0,0] - R[1,1] - R[2,2])/4)
+#     u_q2 = np.sqrt((1 - R[0,0] + R[1,1] - R[2,2])/4)
+#     u_q3 = np.sqrt((1 - R[0,0] - R[1,1] + R[2,2])/4)
+    
+#     q = np.array([u_q0, u_q1, u_q2, u_q3])
+    
+#     if u_q0 == max(q):
+#         q0 = u_q0
+#         q1 = (R[2,1] - R[1,2])/(4*q0)
+#         q2 = (R[0,2] - R[2,0])/(4*q0)
+#         q3 = (R[1,0] - R[0,1])/(4*q0)
+        
+#     if u_q1 == max(q):
+#         q1 = u_q1
+#         q0 = (R[2,1] - R[1,2])/(4*q1)
+#         q2 = (R[0,1] + R[1,0])/(4*q1)
+#         q3 = (R[0,2] + R[2,0])/(4*q1)
+    
+#     if u_q2 == max(q):
+#         q2 = u_q2
+#         q0 = (R[0,2] - R[2,0])/(4*q2)
+#         q1 = (R[0,1] + R[1,0])/(4*q2)
+#         q3 = (R[1,2] + R[2,1])/(4*q2)    
+        
+#     if u_q3 == max(q):
+#         q3 = u_q3
+#         q0 = (R[1,0] - R[0,1])/(4*q3)  
+#         q1 = (R[0,2] + R[2,0])/(4*q3)
+#         q2 = (R[1,2] + R[2,1])/(4*q3)  
+      
+#     q = np.array([q0, q1, q2, q3])   
+#     return q
+
+def rotm2quat(m:np.ndarray) -> np.ndarray:
     """Creates a quaternion from a rotation matrix defining a given orientation.
     
     Parameters
@@ -178,39 +225,8 @@ def rotm2quat(R:np.ndarray) -> np.ndarray:
     q : [4x1] np.ndarray
         quaternion defining the orientation    
     """    
-    u_q0 = np.sqrt((1 + R[0,0] + R[1,1] + R[2,2])/4) # the prefix u_ means unsigned
-    u_q1 = np.sqrt((1 + R[0,0] - R[1,1] - R[2,2])/4)
-    u_q2 = np.sqrt((1 - R[0,0] + R[1,1] - R[2,2])/4)
-    u_q3 = np.sqrt((1 - R[0,0] - R[1,1] + R[2,2])/4)
-    
-    q = np.array([u_q0, u_q1, u_q2, u_q3])
-    
-    if u_q0 == max(q):
-        q0 = u_q0
-        q1 = (R[2,1] - R[1,2])/(4*q0)
-        q2 = (R[0,2] - R[2,0])/(4*q0)
-        q3 = (R[1,0] - R[0,1])/(4*q0)
-        
-    if u_q1 == max(q):
-        q1 = u_q1
-        q0 = (R[2,1] - R[1,2])/(4*q1)
-        q2 = (R[0,1] + R[1,0])/(4*q1)
-        q3 = (R[0,2] + R[2,0])/(4*q1)
-    
-    if u_q2 == max(q):
-        q2 = u_q2
-        q0 = (R[0,2] - R[2,0])/(4*q2)
-        q1 = (R[0,1] + R[1,0])/(4*q2)
-        q3 = (R[1,2] + R[2,1])/(4*q2)    
-        
-    if u_q3 == max(q):
-        q3 = u_q3
-        q0 = (R[1,0] - R[0,1])/(4*q3)  
-        q1 = (R[0,2] + R[2,0])/(4*q3)
-        q2 = (R[1,2] + R[2,1])/(4*q3)  
-      
-    q = np.array([q0, q1, q2, q3])   
-    return q
+    q1,q2,q3,q0 = Rotation.from_matrix(m).as_quat()
+    return np.array([q0,q1,q2,q3])
 
 def quatpos2SE3(x7):
     """ Converts a vector concatenated by quaternion 
