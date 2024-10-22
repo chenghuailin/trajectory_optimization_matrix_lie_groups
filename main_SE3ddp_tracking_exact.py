@@ -101,15 +101,17 @@ Q = np.diag([
     10., 10., 10., 1., 1., 1.,
     1., 1., 1., 1., 1., 1. 
 ])
-P = np.diag([
-    10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.  
-]) * 10
+# P = np.diag([
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1.  
+# ]) * 10
+
 # Q = np.diag([ 
 #     10., 10., 10., 1., 1., 1.,
 #     0., 0., 0., 0., 0., 0. 
 # ]) 
-# P = Q * 10
+
+P = Q * 10
 R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
@@ -143,8 +145,17 @@ ilqr = iLQR_Tracking_SE3(dynamics, cost, N,
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
+# =====================================================
+# Visualization Preparation
+# =====================================================
+
+err_ilqr = [cost._err(x, i) for i, x in enumerate(xs_ilqr)]
+
 xs_ilqr_mnf = parallel_SE32manifSE3([x[0] for x in xs_ilqr])
 qref_ilqr_mnf = parallel_SE32manifSE3(q_ref)
+
+norm_q_err = np.array([np.linalg.norm(err_ilqr[i][0],ord=2) for i in range( len(err_ilqr) )])
+norm_vel_err = np.array([np.linalg.norm(err_ilqr[i][1],ord=2) for i in range( len(err_ilqr) )])
 
 # =====================================================
 # Visualization by State
@@ -168,6 +179,15 @@ plt.ylabel('Cost')
 plt.legend()
 plt.grid()
 
+plt.figure(3)
+plt.plot(norm_q_err, label='Configuration Error')
+plt.plot(norm_vel_err, label='Velocity Error')
+plt.title('Error Norm Evolution')
+plt.xlabel('Iteration')
+plt.ylabel('Norm')
+plt.legend()
+plt.grid()
+
 
 # =====================================================
 # Visualization Trajectory with Vector
@@ -177,7 +197,7 @@ interval_plot = int((Nsim + 1) / 40)
 lim = 5
 
 # Initialize the plot
-fig1 = plt.figure(3)
+fig1 = plt.figure()
 ax1 = fig1.add_subplot(111, projection='3d')
 
 # Define an initial vector and plot on figure
@@ -231,8 +251,10 @@ ax1.set_zlabel('Z')
 # =====================================================
 # Visualization Final Trajectory with Vector as Animation
 # =====================================================
+
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D  # Ensure 3D plotting is enabled
+from matplotlib.widgets import Button
 
 # Extract positions from the reference and final trajectories
 ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
@@ -333,7 +355,7 @@ def update_anim(frame):
     - Updates the orientation quivers for both reference and final trajectories.
     - Updates the current position markers.
     """
-    global ref_quiver, final_quiver
+    global ref_quiver, final_quiver, final_current_frame
     
     # Update the final trajectory line
     traj = final_positions[:frame + 1]
@@ -387,15 +409,63 @@ def update_anim(frame):
     # Update the plot title to show the current frame
     ax_anim.set_title(f'Final Trajectory Animation with Reference\nFrame: {frame}/{Nsim}')
     
+    # Update the current frame
+    final_current_frame = frame
+    
     return final_traj_line, ref_quiver, final_quiver, ref_point, final_point
 
 # Create the animation
 ani_final_traj2 = animation.FuncAnimation(
     fig_anim, update_anim, frames=frames,
     init_func=init_anim, blit=False,
-    interval=50,  # Time between frames in milliseconds
+    interval=30,  # Time between frames in milliseconds
     repeat=True    # Repeat the animation indefinitely
 )
+
+# Control variables for animation
+final_current_frame = 0
+final_is_paused = False
+
+# Add interactive buttons
+# Pause/Play Button
+ax_pause_final = plt.axes([0.7, 0.01, 0.1, 0.05])
+btn_pause_final = Button(ax_pause_final, 'Pause/Play')
+
+# Previous Frame Button
+ax_prev_final = plt.axes([0.81, 0.01, 0.1, 0.05])
+btn_prev_final = Button(ax_prev_final, 'Previous')
+
+# Next Frame Button
+ax_next_final = plt.axes([0.59, 0.01, 0.1, 0.05])
+btn_next_final = Button(ax_next_final, 'Next')
+
+# Define button callback functions
+def toggle_pause_final(event):
+    global final_is_paused
+    if final_is_paused:
+        ani_final_traj2.event_source.start()
+    else:
+        ani_final_traj2.event_source.stop()
+    final_is_paused = not final_is_paused
+
+def prev_frame_final(event):
+    global final_current_frame
+    if final_current_frame > 0:
+        final_current_frame -= frame_interval
+        update_anim(final_current_frame)
+        plt.draw()
+
+def next_frame_final(event):
+    global final_current_frame
+    if final_current_frame < Nsim:
+        final_current_frame += frame_interval
+        update_anim(final_current_frame)
+        plt.draw()
+
+# Connect buttons to their callback functions
+btn_pause_final.on_clicked(toggle_pause_final)
+btn_prev_final.on_clicked(prev_frame_final)
+btn_next_final.on_clicked(next_frame_final)
 
 
 # =====================================================

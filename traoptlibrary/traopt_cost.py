@@ -613,6 +613,22 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         """State cost coefficient matrix in the quadratic terminal cost."""
         return self._P
     
+    def _err(self, x, i):
+        """Return the error with the reference
+        """
+        q, xi = x 
+        q = SE32manifSE3( q )
+
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        # q_err = manifse32se3( q.lminus( q_ref ).coeffs() )
+        q_err = manifse32se3( q.rminus( q_ref ).coeffs() )
+
+        vel_err = xi - xi_ref
+
+        return q_err, vel_err
+    
     def _l(self, x, u, i ):
         """Stage cost function.
 
@@ -634,7 +650,6 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         # Compute the logarithmic map of the pose error.
         # q_err = q.rminus( q_ref ).coeffs()
         q_err = q.lminus( q_ref ).coeffs()
-        # q_err = se3_vee(logm(np.linalg.inv( q_ref.transformation() ) @ q ))
         q_err = manifse32se3( q_err ).reshape(6,1)
         q_cost = q_err.T @ self._Q[:self._error_state_size, :self._error_state_size] @ q_err
 
