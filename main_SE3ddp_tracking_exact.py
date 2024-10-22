@@ -4,7 +4,7 @@ import numpy as np
 from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
-from traoptlibrary.traopt_utilis import skew, unskew, se3_hat, se3_vee, quatpos2SE3
+from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3
 from scipy.linalg import expm, logm
 import matplotlib.pyplot as plt
 import time
@@ -97,14 +97,19 @@ print("Dynamics Instatiation Finished")
 
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
 
+# Q = np.diag([ 
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1. 
+# ])
+# P = np.diag([
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1.  
+# ]) * 10
 Q = np.diag([ 
     10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1. 
+    0.1, 0.1, 0.1, 0.1, 0.1, 0.1 
 ])
-P = np.diag([
-    10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.  
-]) * 10
+P = Q * 10
 R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
@@ -133,27 +138,27 @@ us_init = np.zeros((N, action_size,))
 
 ilqr = iLQR_Tracking_SE3(dynamics, cost, N, 
                             hessians=HESSIANS,
-                            rollout='linear')
+                            rollout='nonlinear')
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
+xs_ilqr_mnf = parallel_SE32manifSE3([x[0] for x in xs_ilqr])
+qref_ilqr_mnf = parallel_SE32manifSE3(q_ref)
 
 # =====================================================
 # Visualization by State
 # =====================================================
 
 fig1 = plt.figure(1)
-ax2 = fig1.add_subplot(111)
-
-
+ax1 = fig1.add_subplot(111)
 for j in range( action_size ):
-    ax2.plot( us_ilqr[:,j], label = 'Input '+str(j) )
-ax2.set_title('iLQR Final Input')
-ax2.set_xlabel('TimeStep')
-ax2.set_ylabel('Input')
-ax2.legend()
-ax2.grid()
+    ax1.plot( us_ilqr[:,j], label = 'Input '+str(j) )
+ax1.set_title('iLQR Final Input')
+ax1.set_xlabel('TimeStep')
+ax1.set_ylabel('Input')
+ax1.legend()
+ax1.grid()
 
 plt.figure(2)
 plt.plot(J_hist_ilqr, label='ilqr')
@@ -165,7 +170,7 @@ plt.grid()
 
 
 # =====================================================
-# Visualization with Vector
+# Visualization Trajectory with Vector
 # =====================================================
 
 interval_plot = int((Nsim + 1) / 40)
@@ -223,6 +228,135 @@ ax1.set_xlabel('X')
 ax1.set_ylabel('Y')
 ax1.set_zlabel('Z')
 
+# # =====================================================
+# # Visualization Error with Vector
+# # =====================================================
+
+# # interval_plot = int((Nsim + 1) / 40)
+# interval_plot = 5
+# lim = 5
+
+# # Initialize the plot
+# fig1 = plt.figure(4)
+# ax1 = fig1.add_subplot(111, projection='3d')
+
+# # Define an initial vector and plot on figure
+# initial_vector = np.array([1, 0, 0])  # Example initial vector
+# ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
+
+# # Loop through quaternion data to plot rotated vectors
+# for i in range(0, Nsim + 1, interval_plot):  
+
+#     se3_matrix = (qref_ilqr_mnf[i].inverse() * xs_ilqr_mnf[i]).transform()
+
+#     rot_matrix = se3_matrix[:3,:3]
+#     rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
+    
+#     # Extract the position 
+#     position = se3_matrix[:3, 3]
+
+#     # Plot the rotated vector
+#     ax1.quiver(position[0], position[1], position[2],
+#               rotated_vector[0], rotated_vector[1], rotated_vector[2],
+#               color='b', length=1, label='Reference Trajectory' if i == 0 else '')
+
+# # Set the limits for the axes
+
+# ax1.set_xlim([-lim, lim]) 
+# ax1.set_ylim([-lim, lim])
+# ax1.set_zlim([-lim, lim])
+# ax1.legend()
+# ax1.set_xlabel('X')
+# ax1.set_ylabel('Y')
+# ax1.set_zlabel('Z')
+
+# =====================================================
+# Visualization Error with Vector as Animation
+# =====================================================
+import matplotlib.animation as animation
+
+# Set the sampling interval for frames
+interval_plot = max(int((Nsim + 1) / 200), 1)  # Adjust as needed
+lim = 1  # Axis display range
+
+# Initialize the plot
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Define an initial vector
+initial_vector = np.array([1, 0, 0])  # Example initial vector
+
+# Plot the initial vector (green)
+initial_quiver = ax.quiver(
+    0, 0, 0,
+    initial_vector[0], initial_vector[1], initial_vector[2],
+    color='g', length=1, normalize=True, label='Initial Vector'
+)
+
+# Initialize annotation for the current stage
+stage_text = ax.text2D(0.05, 0.95, "", transform=ax.transAxes, fontsize=12)
+
+# Set the limits for the axes
+ax.set_xlim([-lim, lim])
+ax.set_ylim([-lim, lim])
+ax.set_zlim([-lim, lim])
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+ax.set_title('Error Trajectory Animation')
+ax.legend()
+ax.grid()
+
+# Prepare frame indices for the animation
+indices = range(0, Nsim + 1, interval_plot) if interval_plot > 0 else range(Nsim + 1)
+
+# Initialize a list to store current error quivers
+error_quivers = []
+
+def update(num):
+    """
+    Update function for the animation.
+    Removes previous error quivers and plots the current error vector.
+    Updates the stage annotation.
+    """
+    # Remove existing error quivers
+    while error_quivers:
+        quiv = error_quivers.pop()
+        quiv.remove()
+
+    # Compute the error SE3 matrix
+    se3_matrix = (qref_ilqr_mnf[num].inverse() * xs_ilqr_mnf[num]).transform()
+
+    # Extract rotation matrix and position vector
+    rot_matrix = se3_matrix[:3, :3]
+    rotated_vector = rot_matrix @ initial_vector  # Apply rotation to the initial vector
+    position = se3_matrix[:3, 3]
+
+    # Plot the error trajectory vector (red)
+    err_quiver = ax.quiver(
+        position[0], position[1], position[2],
+        rotated_vector[0], rotated_vector[1], rotated_vector[2],
+        color='r', length=1, normalize=True,
+        label='Error Trajectory' if num == indices.start else ""
+    )
+    error_quivers.append(err_quiver)
+
+    # Update stage annotation
+    stage_text.set_text(f'Stage: {num}/{Nsim}')
+
+    return error_quivers + [stage_text]
+
+# Create the animation
+ani = animation.FuncAnimation(
+    fig, update, frames=indices,
+    interval=100,  
+    blit=False,
+    repeat_delay=500,
+    repeat=True  # Allow the animation to repeat indefinitely
+)
+
+# Optional: Save the animation as a video file
+# ani.save('error_trajectory_animation.mp4', writer='ffmpeg', fps=10)
 
 # # =====================================================
 # # Plotting
