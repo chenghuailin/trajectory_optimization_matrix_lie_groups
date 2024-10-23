@@ -4,7 +4,7 @@ import numpy as np
 from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
-from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3
+from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3,rotm2euler
 from scipy.linalg import expm, logm
 import matplotlib.pyplot as plt
 import time
@@ -37,7 +37,7 @@ J = np.block([
 ])
 
 # =====================================================
-# Reference Generation (Also the tracking reference)
+# Tracking Reference Generation 
 # =====================================================
 
 quat0_ref = np.array([1, 0, 0, 0])
@@ -97,20 +97,19 @@ print("Dynamics Instatiation Finished")
 
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
 
-Q = np.diag([ 
-    10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1. 
-])
+# Q = np.diag([ 
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1. 
+# ])
 # P = np.diag([
 #     10., 10., 10., 1., 1., 1.,
 #     1., 1., 1., 1., 1., 1.  
 # ]) * 10
 
-# Q = np.diag([ 
-#     10., 10., 10., 1., 1., 1.,
-#     0., 0., 0., 0., 0., 0. 
-# ]) 
-
+Q = np.diag([ 
+    1., 1., 1., 1., 1., 1.,
+    1., 1., 1., 1., 1., 1. 
+]) 
 P = Q * 10
 R = np.identity(6) * 1e-5
 
@@ -157,6 +156,11 @@ qref_ilqr_mnf = parallel_SE32manifSE3(q_ref)
 norm_q_err = np.array([np.linalg.norm(err_ilqr[i][0],ord=2) for i in range( len(err_ilqr) )])
 norm_vel_err = np.array([np.linalg.norm(err_ilqr[i][1],ord=2) for i in range( len(err_ilqr) )])
 
+q_euler_ilqr = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_ilqr ] )
+q_xyz_ilqr = np.array([ x[0][:3,3] for x in xs_ilqr ] )
+vel_euler_ilqr = np.array([ x[1][:3] for x in xs_ilqr ])
+vel_xyz_ilqr = np.array([ x[1][3:] for x in xs_ilqr ])
+
 # =====================================================
 # Visualization by State
 # =====================================================
@@ -186,6 +190,45 @@ plt.title('Error Norm Evolution')
 plt.xlabel('Iteration')
 plt.ylabel('Norm')
 plt.legend()
+plt.grid()
+
+plt.figure(4)
+plt.suptitle("iLQR Final State")
+
+plt.subplot(221)
+for i in range(3):
+    plt.plot( q_euler_ilqr[:,i] )
+plt.title('Euler Angle (z-x-y) - World Frame')
+plt.xlabel('Iteration')
+plt.ylabel('Degree')
+plt.legend(['Z-Axis','X-Axis','Y-Axis'])
+plt.grid()
+
+plt.subplot(222)
+for i in range(3):
+    plt.plot( q_xyz_ilqr[:,i] )
+plt.title('Translation - World Frame')
+plt.xlabel('Iteration')
+plt.ylabel('m')
+plt.legend(['X','Y','Z'])
+plt.grid()
+
+plt.subplot(223)
+for i in range(3):
+    plt.plot( vel_euler_ilqr[:,i] )
+plt.title('Angular Velocity - Body Frame')
+plt.xlabel('Iteration')
+plt.ylabel('Degree/s')
+plt.legend(['X-Axis','Y-Axis','Z-Axis'])
+plt.grid()
+
+plt.subplot(224)
+for i in range(3):
+    plt.plot( vel_xyz_ilqr[:,i] )
+plt.title('Translation Velocity - Body Frame')
+plt.xlabel('Iteration')
+plt.ylabel('m/s')
+plt.legend(['X','Y','Z'])
 plt.grid()
 
 
@@ -262,7 +305,7 @@ ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
 final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory positions (Nsim+1, 3)
 
 # Define frame interval for smoother animation
-frame_interval = 5
+frame_interval = 1
 frames = range(0, Nsim + 1, frame_interval)
 
 # Initialize the figure and subplots
@@ -398,7 +441,7 @@ def update_anim(frame):
         pos_error[0], pos_error[1], pos_error[2],
         rotated_error_vec[0], rotated_error_vec[1], rotated_error_vec[2],
         color='red', length=1, normalize=True,
-        label='Error Trajectory' if frame == frames.start else ""
+        label='Error Trajectory' if frame == frames[0] else ""
     )
     error_quivers.append(err_quiver)
     
@@ -418,7 +461,7 @@ ani_final_traj = animation.FuncAnimation(
     update_anim, 
     frames=frames,
     blit=False,
-    interval=30,  # Time between frames in milliseconds
+    interval=1,  # Time between frames in milliseconds
     repeat=True    # Repeat the animation indefinitely
 )
 

@@ -228,6 +228,22 @@ def rotm2quat(m:np.ndarray) -> np.ndarray:
     q1,q2,q3,q0 = Rotation.from_matrix(m).as_quat()
     return np.array([q0,q1,q2,q3])
 
+def rotm2euler(m:np.ndarray) -> np.ndarray:
+    """Creates a quaternion from a rotation matrix defining a given orientation.
+    
+    Parameters
+    ----------
+    R : [3x3] np.ndarray
+        Rotation matrix
+            
+    Returns
+    -------
+    q : [4x1] np.ndarray
+        quaternion defining the orientation    
+    """    
+    theta_z,theta_x,theta_y = Rotation.from_matrix(m).as_euler('zxy',degrees=True)
+    return np.array([theta_z,theta_x,theta_y])
+
 def quatpos2SE3(x7):
     """ Converts a vector concatenated by quaternion 
         and position to SE(3) matrix. 
