@@ -4,8 +4,9 @@ import numpy as np
 from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
-from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3,rotm2euler
-from scipy.linalg import expm, logm
+from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3,\
+    rotm2euler,manifse32se3
+from scipy.linalg import expm
 import matplotlib.pyplot as plt
 import time
 
@@ -22,7 +23,7 @@ key = random.key(seed)
 jax.config.update("jax_enable_x64", True)
 
 dt = 0.01
-Nsim = 1400   # Simulation horizon
+Nsim = int(14/dt)   # Simulation horizon
 # Nsim = 400   
 
 # ====================
@@ -97,20 +98,20 @@ print("Dynamics Instatiation Finished")
 
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
 
-# Q = np.diag([ 
-#     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1. 
-# ])
-# P = np.diag([
-#     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1.  
-# ]) * 10
-
 Q = np.diag([ 
-    1., 1., 1., 1., 1., 1.,
+    10., 10., 10., 1., 1., 1.,
     1., 1., 1., 1., 1., 1. 
-]) 
-P = Q * 10
+])
+P = np.diag([
+    10., 10., 10., 1., 1., 1.,
+    1., 1., 1., 1., 1., 1.  
+]) * 10
+
+# Q = np.diag([ 
+#     10000., 10000., 10000., 10000., 10000., 10000.,
+#     10., 10., 10., 10., 10., 10. 
+# ]) 
+# P = Q * 10
 R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
@@ -128,18 +129,23 @@ quat0 = np.array([1., 0., 0., 0.])
 p0 = np.array([-1., -1., -0.2])
 q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
 
-w0 = np.array([0., 0., 0.1]) 
-v0 = np.array([0.1, 0.1, 0.1])
+w0 = np.array([0., 0., 1.]) 
+v0 = np.array([1, 0.1, 0.1])
 xi0 = np.concatenate((w0, v0))
 
+# quat0_ref = np.array([1, 0, 0, 0])
+# p0_ref = np.array([0, 0, 0])
+# w0_ref = np.array([0, 0, 1]) * 1
+# v0_ref = np.array([1, 0, 0.1]) * 2
+
 x0 = [ q0, xi0 ]
-print(x0)
+print(f'Initial State:\n{x0}')
 
 us_init = np.zeros((N, action_size,))
 
 ilqr = iLQR_Tracking_SE3(dynamics, cost, N, 
                             hessians=HESSIANS,
-                            rollout='nonlinear')
+                            rollout='linear')
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
@@ -150,7 +156,7 @@ xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
 
 err_ilqr = [cost._err(x, i) for i, x in enumerate(xs_ilqr)]
 
-xs_ilqr_mnf = parallel_SE32manifSE3([x[0] for x in xs_ilqr])
+q_ilqr_mnf = parallel_SE32manifSE3([x[0] for x in xs_ilqr])
 qref_ilqr_mnf = parallel_SE32manifSE3(q_ref)
 
 norm_q_err = np.array([np.linalg.norm(err_ilqr[i][0],ord=2) for i in range( len(err_ilqr) )])
@@ -160,6 +166,10 @@ q_euler_ilqr = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_ilqr ] )
 q_xyz_ilqr = np.array([ x[0][:3,3] for x in xs_ilqr ] )
 vel_euler_ilqr = np.array([ x[1][:3] for x in xs_ilqr ])
 vel_xyz_ilqr = np.array([ x[1][3:] for x in xs_ilqr ])
+
+# Extract positions from the reference and final trajectories
+ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
+final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory positions (Nsim+1, 3)
 
 # =====================================================
 # Visualization by State
@@ -193,6 +203,24 @@ plt.legend()
 plt.grid()
 
 plt.figure(4)
+plt.suptitle('Error Evolution')
+plt.subplot(121)
+for j in range(6):
+    plt.plot( [err_ilqr[i][0][j] for i in range(len(err_ilqr))] )
+plt.title('Configuration Error')
+plt.legend(['th_x','th_y','th_z','pos_x','pos_y','pos_z'])
+plt.xlabel('Iteration')
+plt.grid()
+
+plt.subplot(122)
+for j in range(6):
+    plt.plot( [err_ilqr[i][1][j] for i in range(len(err_ilqr))] )
+plt.title('Velocity Error')
+plt.legend(['w_x','w_y','w_z','v_x','v_y','v_z'])
+plt.xlabel('Iteration')
+plt.grid()
+
+plt.figure(5)
 plt.suptitle("iLQR Final State")
 
 plt.subplot(221)
@@ -237,11 +265,11 @@ plt.grid()
 # =====================================================
 
 interval_plot = int((Nsim + 1) / 40)
-lim = 5
 
 # Initialize the plot
 fig1 = plt.figure()
-ax1 = fig1.add_subplot(111, projection='3d')
+plt.suptitle('Final iLQR Trajecotry')
+ax1 = fig1.add_subplot(121, projection='3d')
 
 # Define an initial vector and plot on figure
 initial_vector = np.array([1, 0, 0])  # Example initial vector
@@ -281,15 +309,24 @@ for i in range(0, Nsim + 1, interval_plot):
               color='r', length=1, label='Final Configuration' if i == 0 else '')
 
 
-# Set the limits for the axes
-
-ax1.set_xlim([-lim, lim]) 
-ax1.set_ylim([-lim, lim])
-ax1.set_zlim([-lim, lim])
+# lim = 5
+# ax1.set_xlim([-lim, lim]) 
+# ax1.set_ylim([-lim, lim])
+# ax1.set_zlim([-lim, lim])
 ax1.legend()
 ax1.set_xlabel('X')
 ax1.set_ylabel('Y')
 ax1.set_zlabel('Z')
+
+ax2 = fig1.add_subplot(122, projection='3d')
+ax2.plot(ref_positions[:, 0], ref_positions[:, 1], ref_positions[:, 2],
+            label='Reference Trajectory', color='blue', linewidth=2)
+ax2.plot(final_positions[:, 0], final_positions[:, 1], final_positions[:, 2],
+            label='Final Trajectory', color='red', linewidth=2)
+ax2.legend()
+ax2.set_xlabel('X')
+ax2.set_ylabel('Y')
+ax2.set_zlabel('Z')
 
 # =====================================================
 # Visualization Final Trajectory with Vector as Animation
@@ -299,10 +336,6 @@ import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D  # Enable 3D plotting
 from matplotlib.widgets import Button
 from matplotlib.lines import Line2D
-
-# Extract positions from the reference and final trajectories
-ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
-final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory positions (Nsim+1, 3)
 
 # Define frame interval for smoother animation
 frame_interval = 1
@@ -356,7 +389,7 @@ ax_anim_traj.legend(handles=legend_elements)
 lim = 1  # Axis display range
 ax_anim_err.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2],
                   color='blue', length=1, normalize=True, label='Reference Vector')
-stage_text = ax_anim_err.text2D(0.05, 0.95, "", transform=ax_anim_err.transAxes, fontsize=12)
+stage_text = ax_anim_err.text2D(0.03, 0.75, "", transform=ax_anim_err.transAxes, fontsize=7)
 
 # Set limits and labels for error plot
 ax_anim_err.set_xlim([-lim, lim])
@@ -432,7 +465,7 @@ def update_anim(frame):
         quiv = error_quivers.pop()
         quiv.remove()
     
-    se3_error = (qref_ilqr_mnf[frame].inverse() * xs_ilqr_mnf[frame]).transform()
+    se3_error = (qref_ilqr_mnf[frame].inverse() * q_ilqr_mnf[frame]).transform()
     rot_error = se3_error[:3, :3]
     rotated_error_vec = rot_error @ initial_vector
     pos_error = se3_error[:3, 3]
@@ -444,9 +477,18 @@ def update_anim(frame):
         label='Error Trajectory' if frame == frames[0] else ""
     )
     error_quivers.append(err_quiver)
+
+    lminus_error = manifse32se3( q_ilqr_mnf[frame].lminus( qref_ilqr_mnf[frame] ))
+    rminus_error = manifse32se3( q_ilqr_mnf[frame].rminus( qref_ilqr_mnf[frame] ))
+    lminus_error_norm = np.linalg.norm(lminus_error,ord=2)
+    rminus_error_norm = np.linalg.norm(rminus_error,ord=2)
+
+    # Update title with current frame
+    ax_anim_err.set_title(f'Error Trajectory Animation\nFrame: {frame}/{Nsim}')
     
     # Update stage annotation
-    stage_text.set_text(f'Frame: {frame}/{Nsim}')
+    stage_text.set_text(f'Left-Error Norm:{lminus_error_norm}\n  {lminus_error}\
+                        \nRight-Error Norm:{rminus_error_norm}\n  {rminus_error}')
 
     # ------------------------------------------------------------------
 

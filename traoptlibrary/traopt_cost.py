@@ -622,8 +622,8 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         q_ref = self._q_ref[i] 
         xi_ref = self._xi_ref[i]
 
-        # q_err = manifse32se3( q.lminus( q_ref ).coeffs() )
-        q_err = manifse32se3( q.rminus( q_ref ).coeffs() )
+        q_err = manifse32se3( q.lminus( q_ref ).coeffs() )
+        # q_err = manifse32se3( q.rminus( q_ref ).coeffs() )
 
         vel_err = xi - xi_ref
 
