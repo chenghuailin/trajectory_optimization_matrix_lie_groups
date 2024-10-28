@@ -130,7 +130,7 @@ p0 = np.array([-1., -1., -0.2])
 q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
 
 w0 = np.array([0., 0., 1.]) 
-v0 = np.array([1, 0.1, 0.1])
+v0 = np.array([1., 0.1, 0.1])
 xi0 = np.concatenate((w0, v0))
 
 # quat0_ref = np.array([1, 0, 0, 0])
@@ -338,7 +338,7 @@ from matplotlib.widgets import Button
 from matplotlib.lines import Line2D
 
 # Define frame interval for smoother animation
-frame_interval = 1
+frame_interval = 5
 frames = range(0, Nsim + 1, frame_interval)
 
 # Initialize the figure and subplots
@@ -503,7 +503,7 @@ ani_final_traj = animation.FuncAnimation(
     update_anim, 
     frames=frames,
     blit=False,
-    interval=1,  # Time between frames in milliseconds
+    interval=0.01,  # Time between frames in milliseconds
     repeat=True    # Repeat the animation indefinitely
 )
 

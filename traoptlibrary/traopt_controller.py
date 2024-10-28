@@ -639,6 +639,14 @@ class iLQR_Tracking_SE3(BaseController):
                 k, K = self._backward_pass(F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
                                            F_xx, F_ux, F_uu)
                 
+                # norm_k_list = np.array([ np.linalg.norm(m) for m in k ])
+                # norm_K_list = np.array([ np.linalg.norm(m) for m in K ])
+                # import matplotlib.pyplot as plt
+                # plt.plot(norm_K_list)
+                # plt.plot(norm_k_list)
+                # plt.legend(["K","k"])
+                # plt.grid()
+                
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
                 print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
@@ -727,27 +735,24 @@ class iLQR_Tracking_SE3(BaseController):
 
             q_new, xi_new = xs_new[i]
             q, xi = xs[i]
+            q_next, xi_next = xs[i+1]
 
-            # dq = se3_vee(logm(np.linalg.inv( q ) @ q_new ))
-
-            # TODO:
             q_new_mnf = SE32manifSE3(q_new)
             q_mnf = SE32manifSE3(q)
-            dq = manifse32se3( q_new_mnf - q_mnf )
+            q_err = manifse32se3( q_new_mnf - q_mnf )
 
-            dxi = xi_new - xi
+            xi_err = xi_new - xi
 
-            xs_err = np.concatenate((dq,dxi))
-
+            xs_err = np.concatenate((q_err, xi_err))
             us_err = alpha * k[i] + K[i].dot(xs_err)
-            
             us_new[i] = us[i] + us_err
 
             if self._rollout_mode == 'linear':
 
-                q_next = manifSE32SE3( q_mnf + se32manifse3(F_x[i,:6,:] @ xs_err + F_u[i,:6,:] @ us_err) )
-                xi_next = xi + F_x[i,6:,:] @ xs_err + F_u[i,6:,:] @ us_err
-                xs_new[i + 1] = [q_next, xi_next].copy()
+                q_next_mnf = SE32manifSE3(q_next)
+                q_next_new = manifSE32SE3( q_next_mnf + se32manifse3(F_x[i,:6,:] @ xs_err + F_u[i,:6,:] @ us_err) )
+                xi_next_new = xi_next + F_x[i,6:,:] @ xs_err + F_u[i,6:,:] @ us_err
+                xs_new[i + 1] = [q_next_new, xi_next_new].copy()
 
             elif self._rollout_mode == 'nonlinear':
 
@@ -1072,13 +1077,18 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         self._action_size = dynamics.action_size
         self._state_size = dynamics.state_size
-        self._error_state_size  = dynamics._error_state_size
+        self._error_state_size = dynamics._error_state_size
 
         self._q_ref = q_ref
         self._xi_ref = xi_ref
 
         self._rollout_mode = rollout
         self._debug = debug
+
+        self._defect_mu0 = 10.
+        self._defect_rho = 0.5
+        self._defect_gamma = 0.1
+        self._defect_min = 10.
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
@@ -1092,6 +1102,18 @@ class iLQR_Tracking_SE3_MS(BaseController):
     @property
     def q_ref(self):
         return self._q_ref
+
+    @property
+    def state_size(self):
+        return self._state_size
+
+    @property
+    def action_size(self):
+        return self._action_size
+    
+    @property
+    def error_state_size(self):
+        return self._error_state_size
 
     def get_q_ref(self,i):
         return self._q_ref[i]
@@ -1155,6 +1177,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
             if changed:
                 (d, F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
                     L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
+                d_norm = self._compute_defect_norm( d )
                 J_opt = L.sum()
 
                 # TODO: multiple shooting gradient 
@@ -1180,16 +1203,29 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 time_calc = end_time - start_time   
                 print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
 
+                _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha, rollout="linear")
+                exact_lqr_cost_change = self._expected_cost_change( 
+                    xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
+                )
+                d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
+                merit = J_opt + d_weight * d_norm
+
                 # Backtracking line search.
                 for alpha in alphas:
-                    xs_new, us_new = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
-                    J_new = self._trajectory_cost(xs_new, us_new)
+                    xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
+
+                    J_new = self._trajectory_cost( xs_new, us_new )
+                    d_new = self._compute_defect( xs_new, us_new )
+                    d_norm_new = self._compute_defect_norm( d_new )
+                    J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
 
                     end_time = time.perf_counter()
                     time_calc = end_time - start_time   
                     print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
 
-                    if J_new < J_opt:
+                    merit_new = J_new + d_weight * d_norm_new
+
+                    if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
                         if np.abs((J_opt - J_new) / J_opt) < tol_J:
                             converged = True
 
@@ -1225,7 +1261,9 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         return xs, us, J_hist, xs_hist, us_hist
 
-    def _rollout(self, xs, us, k, K, d, F_x, F_u, alpha=1.0):
+    def _rollout(self, xs, us, k, K, d, 
+                 F_x, F_u, alpha=1.0,
+                 rollout=None):
         """Applies the controls for a given trajectory.
 
         Args:
@@ -1233,17 +1271,28 @@ class iLQR_Tracking_SE3_MS(BaseController):
             us: Nominal control path [N, action_size].
             k: Feedforward gains [N, action_size].
             K: Feedback gains [N, action_size, state_size].
+            F_x: Jacobian of dynamics w.r.t. state, [N+1, state_size, state_size].
+            F_u: Jacobian of dynamics w.r.t. input, [N, state_size, input_size].
             alpha: Line search coefficient.
+            rollout: Rollout mode, "nonlinear" / "linear" / "hybrid" .
 
         Returns:
             Tuple of
                 xs: state path [N+1, state_size].
                 us: control path [N, action_size].
+                xs_errs: state deviation from nominal [N, action_size].
+                us_errs: control deviation from nominal [N, control_size].
         """
         xs_new = [None] * (self.N + 1)
         us_new = np.zeros_like(us)
 
         xs_new[0] = xs[0].copy()
+
+        xs_errs = np.empty((self.N, self.state_size))
+        us_errs = np.empty((self.N, self.action_size))
+
+        if rollout is None:
+            rollout = self._rollout_mode
 
         for i in range(self.N):
 
@@ -1253,6 +1302,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
             q_new_mnf = SE32manifSE3(q_new)
             q_mnf = SE32manifSE3(q)
+            q_next_mnf = SE32manifSE3(q_next)
             q_err = manifse32se3( q_new_mnf - q_mnf )
 
             xi_err = xi_new - xi
@@ -1261,10 +1311,13 @@ class iLQR_Tracking_SE3_MS(BaseController):
             us_err = alpha * k[i] + K[i].dot(xs_err)
             us_new[i] = us[i] + us_err
 
-            if self._rollout_mode == 'nonlinear':
+            xs_errs[i] = xs_err
+            us_errs[i] = us_err
 
-                dq_mnf = se32manifse3(d[i,:6])
-                dxi = d[i,6:]
+            defect_q_mnf = se32manifse3(d[i,:6])
+            defect_xi = d[i,6:]
+
+            if rollout == 'nonlinear':    
 
                 fq_new, fxi_new = self.dynamics.f( 
                     [ q_new, xi_new ],
@@ -1281,13 +1334,21 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 fq_mnf = SE32manifSE3( fq )
 
                 q_next_new = manifSE32SE3( 
-                    SE32manifSE3(q_next) * (alpha * dq_mnf).exp() * fq_mnf.inverse() * fq_new_mnf 
+                    q_next_mnf * (alpha * defect_q_mnf).exp() * fq_mnf.inverse() * fq_new_mnf 
                 )
-                xi_next_new = xi_next + fxi_new - fxi + alpha * dxi
+                xi_next_new = xi_next + fxi_new - fxi + alpha * defect_xi
 
                 xs_new[i+1] = [ q_next_new, xi_next_new ]
+
+            elif rollout == "linear":
+
+                q_next_new = manifSE32SE3( 
+                    q_next_mnf + ( se32manifse3(F_x[i,:6,:] @ xs_err + F_u[i,:6,:] @ us_err ) + alpha * defect_q_mnf )
+                )
+                xi_next_new = xi_next + F_x[i,6:,:] @ xs_err + F_u[i,6:,:] @ us_err + alpha * defect_xi
+                xs_new[i + 1] = [q_next_new, xi_next_new].copy()
                 
-        return xs_new, us_new
+        return xs_new, us_new, xs_errs, us_errs
 
     def _trajectory_cost(self, xs, us):
         """Computes the given trajectory's cost.
@@ -1302,6 +1363,64 @@ class iLQR_Tracking_SE3_MS(BaseController):
         J = map(lambda args: self.cost.l(*args), zip(xs[:-1], us,
                                                      range(self.N)))
         return sum(J) + self.cost.l(xs[-1], None, self.N, terminal=True)
+    
+    def _expected_cost_change(self, xs_errs, us_errs, l_x, l_u, l_xx, l_ux, l_uu, alpha=1.0):
+        """Computes the expected cost change
+        """
+        cost_first_order = 0.
+        cost_second_order = 0.
+        for i in range(self.N):
+            cost_first_order += l_x[i].T @ xs_errs[i] + l_u[i].T @ us_errs[i]
+            cost_second_order += xs_errs[i].T @ l_xx[i] @ xs_errs[i] \
+                                +  us_errs[i].T @ l_uu[i] @ us_errs[i] \
+                                +  2 * us_errs[i].T @ l_ux[i] @ xs_errs[i] 
+        i = self.N
+        cost_first_order += l_x[i].T @ xs_errs[i]
+        cost_second_order += xs_errs[i].T @ l_xx[i] @ xs_errs[i]
+        return cost_first_order, cost_second_order
+    
+    def _scale_cost_change( self, ecc, alpha ):
+        return alpha * ecc[0] + 0.5 * (alpha**2) * ecc[1] 
+
+    def _update_defect_weight( self, expected_cost_change, d_norm ):
+        """Computes the expected cost change
+        """
+        defect_weight = self._defect_mu0 \
+            + np.abs(expected_cost_change[0]) / ( (1 - self._defect_rho) * d_norm )
+        return defect_weight
+
+    def _compute_defect(self, xs, us):
+        """Compute the dynamics defect
+
+        Args:
+            xs: State path [N+1, [q, xi]].
+            us: Control path [N, action_size].
+
+        Returns:
+            d: defect vector [N, state_size].
+        """
+        d = np.empty((self.N, self.state_size))
+        for i in range(self.N):
+            f_xs = self.dynamics.f(xs[i], us[i], i)
+            d_q = manifse32se3( 
+                SE32manifSE3(f_xs[0]) - SE32manifSE3(xs[i+1][0])
+            )
+            d_xi = f_xs[1] - xs[i+1][1]
+            d[i] = np.concatenate(
+                ( d_q, d_xi )
+            )
+        return d
+
+    def _compute_defect_norm(self, defect, order=2):
+        """Compute norm of defect
+
+        Args:
+            d: defect vector [N, state_size].
+
+        Returns:
+            dnorm: scalar.
+        """
+        return np.linalg.norm(defect.reshape(-1,), order)
 
     def _linearization(self, xs, us):
         """Apply the forward dynamics to have a trajectory from the starting
@@ -1365,7 +1484,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
             d_q = manifse32se3( 
                 SE32manifSE3(self.dynamics.f(x, u, i)[0]) - SE32manifSE3(x_next[0])
             )
-            d_xi = x_next[1] - self.dynamics.f(x, u, i)[1]
+            d_xi = self.dynamics.f(x, u, i)[1] - x_next[1]
             d[i] = np.concatenate(
                 ( d_q, d_xi )
             )
