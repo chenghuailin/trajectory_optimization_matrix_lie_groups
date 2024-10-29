@@ -600,6 +600,7 @@ class iLQR_Tracking_SE3(BaseController):
         J_hist = []
         xs_hist = []
         us_hist = []
+        grad_hist = []
 
         changed = True
         converged = False
@@ -615,20 +616,17 @@ class iLQR_Tracking_SE3(BaseController):
             time_calc = end_time - start_time
             print("Start Iteration:", iteration, ", Used Time:", time_calc )
 
-            if changed:
-                (F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
-                    L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
-                J_opt = L.sum()
-                changed = False
+            (F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
+                L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
+            J_opt = L.sum()
 
-                _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
-                if grad_wrt_input_norm < tol_grad_norm:
-                    converged = True
-                    # accepted = True
-                    changed = False
-                    print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
-                    break
-                print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
+            _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
+            grad_hist.append(grad_wrt_input_norm)
+            if grad_wrt_input_norm < tol_grad_norm:
+                converged = True
+                print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
+                break
+            print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
@@ -667,7 +665,6 @@ class iLQR_Tracking_SE3(BaseController):
                         J_opt = J_new
                         xs = xs_new
                         us = us_new
-                        changed = True
 
                         # Accept this.
                         accepted = True
@@ -694,7 +691,7 @@ class iLQR_Tracking_SE3(BaseController):
         self._k = k
         self._K = K
 
-        return xs, us, J_hist, xs_hist, us_hist
+        return xs, us, J_hist, xs_hist, us_hist, grad_hist
     
     def _init_rollout(self, x0, us):
         """ Initially rollout a dynamically feasible trajectory.

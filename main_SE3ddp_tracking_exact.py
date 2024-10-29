@@ -5,8 +5,9 @@ from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3,\
-    rotm2euler,manifse32se3
+    rotm2euler, manifse32se3, rotmpos2SE3
 from scipy.linalg import expm
+from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 import time
 
@@ -125,18 +126,27 @@ print(f"Cost instantiation took {end_time - start_time:.4f} seconds")
 # Solver Instantiation
 # =====================================================
 
-quat0 = np.array([1., 0., 0., 0.])
-p0 = np.array([-1., -1., -0.2])
-q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
+# quat0 = np.array([1., 0., 0., 0.])
+# p0 = np.array([-1., -1., -0.2])
+# q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
 
-w0 = np.array([0., 0., 1.]) 
-v0 = np.array([1., 0.1, 0.1])
+# w0 = np.array([0., 0., 0.1]) 
+# v0 = np.array([0.1, 0.1, 0.1])
+
+R0 = Rotation.from_euler(
+    'zyx', [ 0., 0., 0. ], degrees=True
+    ).as_matrix()
+p0 = np.array([1., 1., -1.])
+q0 = rotmpos2SE3( R0, p0 )
+w0 = np.array([-1.0, 0., 1.]) 
+v0 = np.array([2.+0., 0.+0., 0.2+0.])
+
 xi0 = np.concatenate((w0, v0))
 
 # quat0_ref = np.array([1, 0, 0, 0])
 # p0_ref = np.array([0, 0, 0])
-# w0_ref = np.array([0, 0, 1]) * 1
-# v0_ref = np.array([1, 0, 0.1]) * 2
+# w0_ref = np.array([0, 0, 1]) 
+# v0_ref = np.array([2, 0, 0.2]) 
 
 x0 = [ q0, xi0 ]
 print(f'Initial State:\n{x0}')
@@ -145,9 +155,9 @@ us_init = np.zeros((N, action_size,))
 
 ilqr = iLQR_Tracking_SE3(dynamics, cost, N, 
                             hessians=HESSIANS,
-                            rollout='linear')
+                            rollout='nonlinear')
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
 # =====================================================
@@ -186,10 +196,17 @@ ax1.legend()
 ax1.grid()
 
 plt.figure(2)
+plt.subplot(211)
 plt.plot(J_hist_ilqr, label='ilqr')
 plt.title('Cost Comparison')
-plt.xlabel('Iteration')
 plt.ylabel('Cost')
+plt.legend()
+plt.grid()
+plt.subplot(212)
+plt.plot(grad_hist_ilqr, label='ilqr')
+plt.title('Gradient Comparison')
+plt.xlabel('Iteration')
+plt.ylabel('Gradient')
 plt.legend()
 plt.grid()
 
@@ -227,7 +244,6 @@ plt.subplot(221)
 for i in range(3):
     plt.plot( q_euler_ilqr[:,i] )
 plt.title('Euler Angle (z-x-y) - World Frame')
-plt.xlabel('Iteration')
 plt.ylabel('Degree')
 plt.legend(['Z-Axis','X-Axis','Y-Axis'])
 plt.grid()
@@ -236,7 +252,6 @@ plt.subplot(222)
 for i in range(3):
     plt.plot( q_xyz_ilqr[:,i] )
 plt.title('Translation - World Frame')
-plt.xlabel('Iteration')
 plt.ylabel('m')
 plt.legend(['X','Y','Z'])
 plt.grid()
