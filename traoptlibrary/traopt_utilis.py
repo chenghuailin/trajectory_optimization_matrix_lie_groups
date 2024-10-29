@@ -22,7 +22,6 @@ def skew( w ):
     else:
         raise ValueError("Input must be a 3d np or jnp vector")
 
-
 def unskew(omega_hat):
     """
     Extract the vector from a 3x3 skew-symmetric matrix.
@@ -39,8 +38,6 @@ def unskew(omega_hat):
         return jnp.array([omega_hat[2, 1], omega_hat[0, 2], omega_hat[1, 0]])
     else:
         raise ValueError("Input must be a 3x3 np or jnp matrix")
-
-    
 
 def se3_hat( xi ):
     
@@ -74,7 +71,6 @@ def se3_vee(se3_mat):
     else:
         raise ValueError("Input must be a 4x4 np or jnp array representing an se(3) matrix")
 
-
 def adjoint( xi ):
     """ Get the the adjoint matrix representation of Lie Algebra,
         i.e. the matrix representation of Lie bracket."""
@@ -89,7 +85,6 @@ def adjoint( xi ):
         return adx
     else:
         raise ValueError("Input must be a 6-d np or jnp vector")
-    
     
 def coadjoint( xi ):
     """ Get the the coadjoint matrix representation of Lie Algebra."""
@@ -244,59 +239,6 @@ def rotm2euler(m:np.ndarray) -> np.ndarray:
     theta_z,theta_x,theta_y = Rotation.from_matrix(m).as_euler('zxy',degrees=True)
     return np.array([theta_z,theta_x,theta_y])
 
-def quatpos2SE3(x7):
-    """ Converts a vector concatenated by quaternion 
-        and position to SE(3) matrix. 
-
-        Args: 
-            x7: 7-d state vector, numpy array, (7,) or (7,1).
-    """
-    if x7.shape == (7,) or x7.shape == (7,1):
-        x7 = x7.reshape((7,1))
-        # se3_matrix = jnp.block([
-        #     [ jnp.array(Quaternion(x7[:4, 0]).rotation_matrix), x7[4:].reshape(3, 1)],
-        #     [ jnp.zeros((1,3)), 1 ],
-        # ])
-        se3_matrix = jnp.block([
-            [ quat2rotm( x7[:4, 0] ), x7[4:].reshape(3, 1)],
-            [ jnp.zeros((1,3)), 1 ],
-        ])
-        return se3_matrix
-    else:
-        raise ValueError("Input must be a 7-d np or jnp vector")
-    
-def SE32quatpos(m):
-    """ Converts a SE(3) matrix to vector concatenated by quaternion 
-        and position. 
-
-        Args: 
-            m: SE3 matrix, numpy array, (4, 4) .
-    """
-    if m.shape == (4,4):
-        # rot_matrix = m[:3, :3]
-        # position = m[:3, 3]
-        # quaternion = Quaternion(matrix=rot_matrix)
-        return jnp.concatenate((
-            # Quaternion(matrix=m[:3, :3]).elements,
-            rotm2quat(m[:3, :3]),
-            m[:3, 3]
-        )).reshape((7,1))
-    else:
-        raise ValueError("Input must be a 7-d np or jnp vector")
-    
-vec_SE32quatpos = jit(vmap(SE32quatpos))
-
-def is_pos_def(A):
-    """ Check if matrix A is PD """
-    if np.array_equal(A, A.T):
-        try:
-            np.linalg.cholesky(A)
-            return True
-        except np.linalg.LinAlgError:
-            return False
-    else:
-        return False
-    
 def euler2quat(eulerAngles:jnp.ndarray|list)->jnp.ndarray:
     """
     Convert an Euler angle to a quaternion.
@@ -339,6 +281,77 @@ def euler2quat(eulerAngles:jnp.ndarray|list)->jnp.ndarray:
     p = jnp.r_[q0, q1, q2, q3]
     
     return p
+
+def quatpos2SE3(x7):
+    """ Converts a vector concatenated by quaternion 
+        and position to SE(3) matrix. 
+
+        Args: 
+            x7: 7-d state vector, numpy array, (7,) or (7,1).
+    """
+    if x7.shape == (7,) or x7.shape == (7,1):
+        x7 = x7.reshape((7,1))
+        # se3_matrix = jnp.block([
+        #     [ jnp.array(Quaternion(x7[:4, 0]).rotation_matrix), x7[4:].reshape(3, 1)],
+        #     [ jnp.zeros((1,3)), 1 ],
+        # ])
+        se3_matrix = jnp.block([
+            [ quat2rotm( x7[:4, 0] ), x7[4:].reshape(3, 1)],
+            [ jnp.zeros((1,3)), 1 ],
+        ])
+        return se3_matrix
+    else:
+        raise ValueError("Input must be a 7-d np or jnp vector")
+    
+def rotmpos2SE3(m, x):
+    """ Converts a vector concatenated by quaternion 
+        and position to SE(3) matrix. 
+
+        Args: 
+            m: rotation matrix, numpy array, (3,3).
+            x: position vector, numpy array, (3,) or (3,1).
+    """
+    if x.shape == (3,) or x.shape == (3,1):
+        x = x.reshape((3,1))
+        se3_matrix = jnp.block([
+            [ m, x],
+            [ jnp.zeros((1,3)), 1 ],
+        ])
+        return se3_matrix
+    else:
+        raise ValueError("Input dimension incorrect")
+    
+def SE32quatpos(m):
+    """ Converts a SE(3) matrix to vector concatenated by quaternion 
+        and position. 
+
+        Args: 
+            m: SE3 matrix, numpy array, (4, 4) .
+    """
+    if m.shape == (4,4):
+        # rot_matrix = m[:3, :3]
+        # position = m[:3, 3]
+        # quaternion = Quaternion(matrix=rot_matrix)
+        return jnp.concatenate((
+            # Quaternion(matrix=m[:3, :3]).elements,
+            rotm2quat(m[:3, :3]),
+            m[:3, 3]
+        )).reshape((7,1))
+    else:
+        raise ValueError("Input must be a 7-d np or jnp vector")
+    
+vec_SE32quatpos = jit(vmap(SE32quatpos))
+
+def is_pos_def(A):
+    """ Check if matrix A is PD """
+    if np.array_equal(A, A.T):
+        try:
+            np.linalg.cholesky(A)
+            return True
+        except np.linalg.LinAlgError:
+            return False
+    else:
+        return False
 
 def SE32manifSE3( x ):
     """ Converts a SE(3) matrix to a manif SE(3) object
