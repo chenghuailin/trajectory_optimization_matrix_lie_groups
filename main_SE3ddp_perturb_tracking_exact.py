@@ -2,7 +2,7 @@ from traoptlibrary.traopt_controller import iLQR_Tracking_SE3
 import numpy as np
 from traoptlibrary.traopt_dynamics import SE3Dynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
-from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3, rotmpos2SE3
+from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, rotmpos2SE3
 from scipy.linalg import expm
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
@@ -11,8 +11,8 @@ from mpl_toolkits.mplot3d import Axes3D
 from joblib import Parallel, delayed
 import time
 import os
-import sys
 import contextlib
+import sys
 
 # 定义一个上下文管理器来禁止打印输出
 @contextlib.contextmanager
@@ -25,19 +25,77 @@ def suppress_stdout():
         finally:
             sys.stdout = old_stdout
 
-def on_iteration(iteration_count, xs, us, J_opt, accepted, converged, grad_wrt_input_norm,
-                alpha, mu, J_hist, xs_hist, us_hist):
-    J_hist.append(J_opt)
-    xs_hist.append(xs.copy())
-    us_hist.append(us.copy())
-    info = "converged" if converged else ("accepted" if accepted else "failed")
-    print("Iteration", iteration_count, info, J_opt, grad_wrt_input_norm, alpha, mu)
+def perturb_x0(value_range, flag_name):
+    """
+    根据 flag name 按照range生成对应的x0的一个list 作为后续并行化优化的输入
+    flag name 可以是 th_z, th_y, th_x, w_x, w_y, w_z, p_x, p_y, p_z, v_x, v_y, v_z
+    """
+    x0_list = []
+    for value in value_range:
+        # 设置默认值
+        th_z = 0.
+        th_y = 0.
+        th_x = 0.
+        w_x = 0.
+        w_y = 0.
+        w_z = 1.
+        
+        p_x = 0. 
+        p_y = 0.
+        p_z = 0.
+        v_x = 2.0
+        v_y = 0.
+        v_z = 0.2
+        
+        # 根据 flag_name 调整对应参数
+        if flag_name == "th_z":
+            th_z = value
+        elif flag_name == "th_y":
+            th_y = value
+        elif flag_name == "th_x":
+            th_x = value
+        elif flag_name == "w_x":
+            w_x = value
+        elif flag_name == "w_y":
+            w_y = value
+        elif flag_name == "w_z":
+            w_z = value
+        elif flag_name == "p_x":
+            p_x = value
+        elif flag_name == "p_y":
+            p_y = value
+        elif flag_name == "p_z":
+            p_z = value
+        elif flag_name == "v_x":
+            v_x = value
+        elif flag_name == "v_y":
+            v_y = value
+        elif flag_name == "v_z":
+            v_z = value
+        else:
+            raise ValueError(f"未知的 flag name: {flag_name}")
+        
+        # 生成初始 SE3
+        R0 = Rotation.from_euler(
+            'zyx', [th_z, th_y, th_x], degrees=True
+        ).as_matrix()
+        p0 = np.array([1. + p_x, 1. + p_y, -1. + p_z])
+        q0 = rotmpos2SE3(R0, p0)
+        w0 = np.array([w_x, w_y, w_z]) 
+        v0 = np.array([v_x, v_y, v_z])
+        xi0 = np.concatenate((w0, v0))
+        
+        x0 = [q0, xi0]
+        x0_list.append(x0)
+    
+    return x0_list 
 
-def run_optimization(initial_conditions, ilqr, us_init, N, n_iterations=200):
-    with suppress_stdout():  # 禁止 fit 函数的打印输出
-        xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
-            ilqr.fit(initial_conditions, us_init, n_iterations=n_iterations, on_iteration=on_iteration)
-    return xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr
+def run_optimization( x0, ilqr, us_init ):
+    with suppress_stdout():
+            xs_ilqr, _, _, _, _, _ = ilqr.fit(
+                x0, us_init, n_iterations=200, on_iteration=lambda *args, **kwargs: None
+            )
+    return (x0, xs_ilqr)
 
 def main():
     
@@ -126,53 +184,47 @@ def main():
     # Setup
     # =====================================================
     
-    th_z_range = np.arange(160, 200, 0.5)  # 根据需要调整步长和范围    
+    th_z_range = np.arange(-160, 160, 0.5)  # 调整步长和范围    
     results_th_z = {
         'th_z': [],
-        'trajectories': []
+        'trajectories_th_z': []
     }
-    
-    # =====================================================
-    # 遍历 th_z_range 并运行优化
-    # =====================================================
-    
-    print("开始遍历 th_z_range 并运行优化")
 
-    for idx, th_z in enumerate(th_z_range):
-        if idx % 50 == 0:
-            print(f"当前处理th_z={th_z} ({idx}/{len(th_z_range)})")
-        try:
-            # 其他角度保持为初始值
-            th_y = 0
-            th_x = 0
-            # 角速度保持为初始值
-            w_x = 0
-            w_y = 0
-            w_z = 1.0  # 原始的 w_z
-            
-            # 生成初始SE3
-            R0 = Rotation.from_euler(
-                'zyx', [th_z, th_y, th_x], degrees=True
-            ).as_matrix()
-            p0 = np.array([1., 1., -1.])
-            q0 = rotmpos2SE3(R0, p0)
-            w0 = np.array([w_x, w_y, w_z]) 
-            v0 = np.array([2., 0., 0.2])
-            xi0 = np.concatenate((w0, v0))
-            
-            x0 = [q0, xi0]
-            us_init = np.zeros((N, action_size,))
-            
-            # 运行优化并抑制打印输出
-            xs_ilqr, us_ilqr, _, _, _, _ = run_optimization(x0, ilqr, us_init, N)
-            
-            # 提取位置
-            final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])
-            results_th_z['th_z'].append(th_z)
-            results_th_z['trajectories'].append(final_positions)
-            print(f"th_z={th_z} 优化完成")
-        except Exception as e:
-            print(f"th_z={th_z} 优化失败: {e}")
+    us_init = np.zeros((N, action_size,))
+    x0_list = perturb_x0( th_z_range, "th_z" )
+    
+    # =====================================================
+    # 并行化优化过程
+    # =====================================================
+
+    print("开始并行化遍历 th_z_range 并运行优化")
+    start_time = time.time()
+    
+    # 使用 joblib 进行并行化
+    n_jobs = -1  # 使用所有可用的CPU核心
+
+    parallel_results = Parallel(n_jobs=n_jobs, verbose=10)(
+        delayed(run_optimization)(x0, ilqr, us_init) for x0 in x0_list
+    )
+    
+    # 处理并行化的结果
+    for i, res in enumerate(parallel_results):
+        if len(res) == 2:
+            _, trajectory = res
+            if trajectory is not None:
+                final_positions = np.array([x[0][:3, 3] for x in trajectory])
+                th_z_val = th_z_range[i]
+                results_th_z['th_z'].append(th_z_val)
+                results_th_z['trajectories_th_z'].append(final_positions)
+            else:
+                print(f"th_z = {th_z_val}° 优化失败: 无轨迹返回")
+        else:
+            th_z_val, trajectory, error_msg = res
+            print(f"th_z = {th_z_val}° 优化失败: {error_msg}")
+    
+    end_time = time.time()
+    total_time = end_time - start_time
+    print(f"整体优化时间: {total_time:.2f} 秒")
     
     # =====================================================
     # 保存结果到 visualization 文件夹
@@ -185,7 +237,7 @@ def main():
     
     save_path = os.path.join(visualization_dir, 'results_perturb_th_z.npz')
     np.savez_compressed(save_path, th_z=np.array(results_th_z['th_z']),
-                        trajectories=np.array(results_th_z['trajectories']))
+                        trajectories=np.array(results_th_z['trajectories_th_z']))
     print(f"优化结果已保存到 {save_path}")
 
     # =====================================================
