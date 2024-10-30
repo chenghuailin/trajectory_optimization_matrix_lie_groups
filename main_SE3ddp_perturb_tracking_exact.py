@@ -90,7 +90,8 @@ def perturb_x0(value_range, flag_name):
     
     return x0_list 
 
-def run_optimization( x0, ilqr, us_init ):
+def run_optimization( x0 ):
+    global ilqr, us_init
     with suppress_stdout():
             xs_ilqr, _, _, _, _, _ = ilqr.fit(
                 x0, us_init, n_iterations=200, on_iteration=lambda *args, **kwargs: None
@@ -148,6 +149,8 @@ def main():
     action_size = 6
     state_size = 12
     debug_dyn = {"vel_zero": False}
+
+    global ilqr, us_init
     
     # =====================================================
     # Dynamics Instantiation
@@ -204,7 +207,7 @@ def main():
     n_jobs = -1  # 使用所有可用的CPU核心
 
     parallel_results = Parallel(n_jobs=n_jobs, verbose=10)(
-        delayed(run_optimization)(x0, ilqr, us_init) for x0 in x0_list
+        delayed(run_optimization)(x0) for x0 in x0_list
     )
     
     # 处理并行化的结果
