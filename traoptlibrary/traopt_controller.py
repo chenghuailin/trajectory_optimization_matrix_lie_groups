@@ -1703,7 +1703,6 @@ class iLQR_Tracking_SE3_MS(BaseController):
         return xs
 
 
-
 class iLQR_Tracking_ErrorState_Approx(BaseController):
 
     """Finite Horizon Iterative Linear Quadratic Regulator for ErrorState Dynamics.

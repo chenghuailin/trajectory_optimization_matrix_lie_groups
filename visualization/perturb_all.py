@@ -13,6 +13,7 @@ from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from mpl_toolkits.mplot3d import Axes3D
+import time
 
 # Define a context manager to suppress stdout
 @contextlib.contextmanager
@@ -232,6 +233,7 @@ def main():
     # Run Parallel Optimization for Each Parameter in Batches
     # =====================================================
     print("Starting parallel optimization for multiple parameters")
+    start_time = time.time()
 
     # Number of parallel jobs, set to -1 to use all available cores
     num_jobs = -1
@@ -256,6 +258,7 @@ def main():
             else:
                 print(f"Parameter {param_name_res}={param_value} has no trajectory due to optimization failure.")
 
+    print(f"Optimization for all parameters finished! Time used:{time.time()-start_time}")
     # =====================================================
     # Save Results to Visualization Folder
     # =====================================================
@@ -294,7 +297,7 @@ def main():
 
         for i, traj in enumerate(results['trajectories'][param_name]):
             color = cmap(norm(results['params'][param_name][i]))
-            pos = np.array([traj_step[:3, 3] for traj_step in traj])
+            pos = np.array([traj_step[0][:3, 3] for traj_step in traj])
             ax.plot(pos[:, 0], pos[:, 1], pos[:, 2], color=color, linewidth=1)
 
         mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
