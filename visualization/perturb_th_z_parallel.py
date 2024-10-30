@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from traoptlibrary.traopt_controller import iLQR_Tracking_SE3
 import numpy as np
 from traoptlibrary.traopt_dynamics import SE3Dynamics
@@ -10,9 +14,7 @@ import matplotlib.cm as cm
 from mpl_toolkits.mplot3d import Axes3D
 from joblib import Parallel, delayed
 import time
-import os
 import contextlib
-import sys
 
 # 定义一个上下文管理器来禁止打印输出
 @contextlib.contextmanager
