@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from mpl_toolkits.mplot3d import Axes3D
 import time
+import pickle
 
 # Define a context manager to suppress stdout
 @contextlib.contextmanager
@@ -183,13 +184,13 @@ def main():
         'th_x': np.arange(150., 210., 0.5),
         'w_x': np.arange(-3, 3, 0.05),
         'w_y': np.arange(-2, 2, 0.05),
-        'w_z': np.arange(-1., 1., 0.05) + 1.,
+        'w_z': np.arange(-1., 1., 0.025) + 1.,
         'p_x': np.arange(-50., 50., 2.),
         'p_y': np.arange(-50., 50., 2.),
         'p_z': np.arange(-50., 50., 2.),
-        'v_x': np.arange(-50., 50., 2.),
-        'v_y': np.arange(-50., 50., 2.),
-        'v_z': np.arange(-50., 50., 2.)
+        'v_x': np.arange(-10., 10., .5),
+        'v_y': np.arange(-10., 10., .5),
+        'v_z': np.arange(-10., 10., .5),
     }
 
     results = {
@@ -267,15 +268,20 @@ def main():
         os.makedirs(visualization_dir)
         print(f"Created directory: {visualization_dir}")
 
-    save_path = os.path.join(visualization_dir, f'results_parameters.npz')
-    # Convert lists to numpy arrays for saving
-    np_save_dict = {}
-    for key in results['params']:
-        np_save_dict[key] = np.array(results['params'][key])
-    for key in results['trajectories']:
-        np_save_dict[key] = np.array(results['trajectories'][key])
+    save_path = os.path.join(visualization_dir, f'results_parameters.pkl')
 
-    np.savez_compressed(save_path, **np_save_dict)
+    # # Convert lists to numpy arrays for saving
+    # np_save_dict = {}
+    # for key in results['params']:
+    #     np_save_dict[key] = np.array(results['params'][key])
+    # for key in results['trajectories']:
+    #     np_save_dict[key] = np.array(results['trajectories'][key])
+    # np.savez_compressed(save_path, **np_save_dict)
+
+    # Use pickle to save the whole results dictionary
+    with open(save_path, 'wb') as f:
+        pickle.dump(results, f)
+
     print(f"Optimization results saved to {save_path}")
 
     # =====================================================
@@ -309,7 +315,8 @@ def main():
         ax.set_xlabel('X')
         ax.set_ylabel('Y')
         ax.set_zlabel('Z')
-        plt.show()
+        
+    plt.show()
 
     # =====================================================
     # Completion Message
