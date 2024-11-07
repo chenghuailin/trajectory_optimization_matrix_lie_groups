@@ -644,6 +644,11 @@ class iLQR_Tracking_SE3(BaseController):
                 # plt.plot(norm_k_list)
                 # plt.legend(["K","k"])
                 # plt.grid()
+
+                # A_cl = [ F_x[i]+F_u[i]@K[i] for i in range(self.N) ]
+                # eig_A_cl = [np.linalg.eig(A_cl[i])[0] for i in range(self.N)]
+                # if iteration == 21:
+                #     pass
                 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -1156,7 +1161,6 @@ class iLQR_Tracking_SE3_MS(BaseController):
         xs_hist = []
         us_hist = []
 
-        changed = True
         converged = False
 
         xs = self._initial_guess( x0 )
@@ -1171,25 +1175,26 @@ class iLQR_Tracking_SE3_MS(BaseController):
             print("Start Iteration:", iteration, ", Used Time:", time_calc )
 
             # Forward rollout only if it needs to be recomputed.
-            if changed:
-                (d, F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
-                    L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
-                d_norm = self._compute_defect_norm( d )
-                J_opt = L.sum()
+            
+            (d, F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
+                L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
+            d_norm = self._compute_defect_norm( d )
+            J_opt = L.sum()
 
-                # TODO: multiple shooting gradient 
-                # _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
-                # if grad_wrt_input_norm < tol_grad_norm:
-                #     converged = True
-                #     changed = False
-                #     # accepted = True
-                #     print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
-                #     break
-                # print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
+            # TODO: multiple shooting gradient 
+            # _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
+            # if grad_wrt_input_norm < tol_grad_norm:
+            #     converged = True
+            #     changed = False
+            #     # accepted = True
+            #     print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
+            #     break
+            # print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
-            print("Iteration:", iteration, "Linearization Finished, Used Time:", time_calc, "Cost:", J_opt )
+            print("Iteration:", iteration, "Linearization Finished, Used Time:", 
+                  time_calc, "Cost:", J_opt, "DefectNorm:", d_norm )
 
             if converged == False:
                 # Backward pass.
@@ -1200,7 +1205,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 time_calc = end_time - start_time   
                 print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
 
-                _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha, rollout="linear")
+                _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, rollout="linear")
                 exact_lqr_cost_change = self._expected_cost_change( 
                     xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
                 )
@@ -1229,11 +1234,32 @@ class iLQR_Tracking_SE3_MS(BaseController):
                         J_opt = J_new
                         xs = xs_new
                         us = us_new
-                        changed = True
 
                         # Accept this.
                         accepted = True
                         break
+
+                # alpha = 1
+                # xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
+
+                # J_new = self._trajectory_cost( xs_new, us_new )
+                # d_new = self._compute_defect( xs_new, us_new )
+                # d_norm_new = self._compute_defect_norm( d_new )
+                # # J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
+
+                # end_time = time.perf_counter()
+                # time_calc = end_time - start_time   
+                # print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
+
+                # if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                #     converged = True
+
+                # J_opt = J_new
+                # xs = xs_new
+                # us = us_new
+
+                # # Accept this.
+                # accepted = True
 
             end_time = time.perf_counter()
             time_calc = end_time - start_time   
@@ -1241,7 +1267,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
            
             if on_iteration:
                 on_iteration(iteration, xs, us, J_opt,
-                            accepted, converged, "unknown",
+                            accepted, converged, d_norm_new,
+                            "unknown",
                             alpha, self._mu, 
                             J_hist, xs_hist, us_hist)
                     
@@ -1285,7 +1312,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         xs_new[0] = xs[0].copy()
 
-        xs_errs = np.empty((self.N, self.state_size))
+        xs_errs = np.empty((self.N+1, self.state_size))
         us_errs = np.empty((self.N, self.action_size))
 
         if rollout is None:
@@ -1344,7 +1371,19 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 )
                 xi_next_new = xi_next + F_x[i,6:,:] @ xs_err + F_u[i,6:,:] @ us_err + alpha * defect_xi
                 xs_new[i + 1] = [q_next_new, xi_next_new].copy()
-                
+
+        # Compute Terminal Error
+        q_new, xi_new = xs_new[self.N]
+        q, xi = xs[self.N]
+
+        q_new_mnf = SE32manifSE3(q_new)
+        q_mnf = SE32manifSE3(q)
+        q_err = manifse32se3( q_new_mnf - q_mnf )
+        xi_err = xi_new - xi
+
+        xs_err = np.concatenate((q_err, xi_err))
+        xs_errs[self.N] = xs_err
+
         return xs_new, us_new, xs_errs, us_errs
 
     def _trajectory_cost(self, xs, us):
