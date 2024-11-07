@@ -8,6 +8,13 @@ from mpl_toolkits.mplot3d import Axes3D
 import pickle
 from matplotlib.widgets import Button, Slider
 import matplotlib.animation as animation
+from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3,\
+    rotm2euler, manifse32se3, rotmpos2SE3
+from scipy.linalg import expm
+
+# =====================================================
+# Setup
+# =====================================================
 
 def load_results(save_path):
     with open(save_path, 'rb') as f:
@@ -31,6 +38,50 @@ parameter_ranges = {
     'v_y': np.arange(-10., 10., .5),
     'v_z': np.arange(-10., 10., .5),
 }
+
+
+# =====================================================
+# Tracking Reference Generation 
+# =====================================================
+
+Nsim = 1400
+dt = 0.01
+
+quat0_ref = np.array([1, 0, 0, 0])
+p0_ref = np.array([0, 0, 0])
+w0_ref = np.array([0, 0, 1]) * 1
+v0_ref = np.array([1, 0, 0.1]) * 2
+
+q0_ref = quatpos2SE3( np.concatenate((quat0_ref, p0_ref)) )
+xi0_ref = np.concatenate((w0_ref, v0_ref))
+
+q_ref = np.zeros((Nsim + 1, 4, 4))  # SE(3)
+q_ref[0] = q0_ref
+xi_ref = np.zeros((Nsim + 1, 6,)) 
+xi_ref[0] = xi0_ref
+
+X = q0_ref.copy()
+
+for i in range(Nsim):
+
+    xi_ref_rt = xi0_ref.copy()
+
+    # You can try some time-varying twists here:
+    # xi_ref_rt[0] = np.sin(i / 20) * 2
+    # xi_ref_rt[4] = np.cos(np.sqrt(i)) * 1
+    # xi_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
+
+    X = X @ expm( se3_hat( xi_ref_rt ) * dt)
+
+    # Store the reference SE3 configuration
+    q_ref[i + 1] = X.copy()
+
+    # Store the reference twists
+    xi_ref[i + 1] = xi_ref_rt.copy()
+
+# =====================================================
+# Tracking Reference Generation 
+# =====================================================
 
 class TrajectoryAnimator:
     def __init__(self, param_name, param_values, trajectories):
