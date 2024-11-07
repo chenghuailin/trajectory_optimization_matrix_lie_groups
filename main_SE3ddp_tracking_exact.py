@@ -99,20 +99,20 @@ print("Dynamics Instatiation Finished")
 
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
 
+# Q = np.diag([ 
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1. 
+# ])
+# P = np.diag([
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1.  
+# ]) * 10
+
 Q = np.diag([ 
     10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1. 
-])
-P = np.diag([
-    10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.  
-]) * 10
-
-# Q = np.diag([ 
-#     10000., 10000., 10000., 10000., 10000., 10000.,
-#     10., 10., 10., 10., 10., 10. 
-# ]) 
-# P = Q * 10
+    0., 0., 0., 0., 0., 0. 
+]) 
+P = Q * 10
 R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
@@ -138,8 +138,10 @@ R0 = Rotation.from_euler(
     ).as_matrix()
 p0 = np.array([1., 1., -1.])
 q0 = rotmpos2SE3( R0, p0 )
-w0 = np.array([-1.0, 0., 1.]) 
-v0 = np.array([2.+0., 0.+0., 0.2+0.])
+# w0 = np.array([1.7, 1.8, 1.8]) 
+# v0 = np.array([0.1, 0.1, 0.1])
+w0 = np.array([0., 0., 0.1]) 
+v0 = np.array([0.1, 0.1, 0.1])
 
 xi0 = np.concatenate((w0, v0))
 
@@ -196,19 +198,19 @@ ax1.legend()
 ax1.grid()
 
 plt.figure(2)
-plt.subplot(211)
+plt.subplot(111)
 plt.plot(J_hist_ilqr, label='ilqr')
 plt.title('Cost Comparison')
 plt.ylabel('Cost')
 plt.legend()
 plt.grid()
-plt.subplot(212)
-plt.plot(grad_hist_ilqr, label='ilqr')
-plt.title('Gradient Comparison')
-plt.xlabel('Iteration')
-plt.ylabel('Gradient')
-plt.legend()
-plt.grid()
+# plt.subplot(212)
+# plt.plot(grad_hist_ilqr, label='ilqr')
+# plt.title('Gradient Comparison')
+# plt.xlabel('Iteration')
+# plt.ylabel('Gradient')
+# plt.legend()
+# plt.grid()
 
 plt.figure(3)
 plt.plot(norm_q_err, label='Configuration Error')
