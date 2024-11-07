@@ -1,5 +1,9 @@
 traoptlibrary/__pycache__
 .ipynb_checkpoints
 ProfileReports
+<<<<<<< HEAD
 .vscode
 visualization/results
+=======
+JustForTest.ipynb
+>>>>>>> 552c0d7 (Update .gitignore)
