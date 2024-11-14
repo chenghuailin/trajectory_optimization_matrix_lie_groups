@@ -1,3 +1,5 @@
 traoptlibrary/__pycache__
 .ipynb_checkpoints
 ProfileReports
+.vscode
+visualization/results

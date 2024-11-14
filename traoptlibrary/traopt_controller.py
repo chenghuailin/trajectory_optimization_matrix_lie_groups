@@ -1212,54 +1212,54 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
                 merit = J_opt + d_weight * d_norm
 
-                # Backtracking line search.
-                for alpha in alphas:
-                    xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
+                # # Backtracking line search.
+                # for alpha in alphas:
+                #     xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
 
-                    J_new = self._trajectory_cost( xs_new, us_new )
-                    d_new = self._compute_defect( xs_new, us_new )
-                    d_norm_new = self._compute_defect_norm( d_new )
-                    J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
+                #     J_new = self._trajectory_cost( xs_new, us_new )
+                #     d_new = self._compute_defect( xs_new, us_new )
+                #     d_norm_new = self._compute_defect_norm( d_new )
+                #     J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
 
-                    end_time = time.perf_counter()
-                    time_calc = end_time - start_time   
-                    print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
+                #     end_time = time.perf_counter()
+                #     time_calc = end_time - start_time   
+                #     print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
 
-                    merit_new = J_new + d_weight * d_norm_new
+                #     merit_new = J_new + d_weight * d_norm_new
 
-                    if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
-                        if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                            converged = True
+                #     if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
+                #         if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                #             converged = True
 
-                        J_opt = J_new
-                        xs = xs_new
-                        us = us_new
+                #         J_opt = J_new
+                #         xs = xs_new
+                #         us = us_new
 
-                        # Accept this.
-                        accepted = True
-                        break
+                #         # Accept this.
+                #         accepted = True
+                #         break
 
-                # alpha = 1
-                # xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
+                alpha = 1
+                xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
 
-                # J_new = self._trajectory_cost( xs_new, us_new )
-                # d_new = self._compute_defect( xs_new, us_new )
-                # d_norm_new = self._compute_defect_norm( d_new )
-                # # J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
+                J_new = self._trajectory_cost( xs_new, us_new )
+                d_new = self._compute_defect( xs_new, us_new )
+                d_norm_new = self._compute_defect_norm( d_new )
+                # J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
 
-                # end_time = time.perf_counter()
-                # time_calc = end_time - start_time   
-                # print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
+                end_time = time.perf_counter()
+                time_calc = end_time - start_time   
+                print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
 
-                # if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                #     converged = True
+                if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                    converged = True
 
-                # J_opt = J_new
-                # xs = xs_new
-                # us = us_new
+                J_opt = J_new
+                xs = xs_new
+                us = us_new
 
-                # # Accept this.
-                # accepted = True
+                # Accept this.
+                accepted = True
 
             end_time = time.perf_counter()
             time_calc = end_time - start_time   

@@ -4,7 +4,7 @@ from jax import vmap, jit
 # import jax.numpy as jnp
 import numpy as jnp
 from jax.numpy.linalg import norm
-from pyquaternion import Quaternion
+# from pyquaternion import Quaternion
 from manifpy import SE3, SE3Tangent
 from concurrent.futures import ThreadPoolExecutor
 from scipy.spatial.transform import Rotation
@@ -223,7 +223,7 @@ def rotm2quat(m:np.ndarray) -> np.ndarray:
     q1,q2,q3,q0 = Rotation.from_matrix(m).as_quat()
     return np.array([q0,q1,q2,q3])
 
-def rotm2euler(m:np.ndarray) -> np.ndarray:
+def rotm2euler(m:np.ndarray, order='zxy') -> np.ndarray:
     """Creates a quaternion from a rotation matrix defining a given orientation.
     
     Parameters
@@ -236,7 +236,9 @@ def rotm2euler(m:np.ndarray) -> np.ndarray:
     q : [4x1] np.ndarray
         quaternion defining the orientation    
     """    
-    theta_z,theta_x,theta_y = Rotation.from_matrix(m).as_euler('zxy',degrees=True)
+    if order is None:
+        order = 'zxy'  # Use a default rotation order
+    theta_z,theta_x,theta_y = Rotation.from_matrix(m).as_euler(order,degrees=True)
     return np.array([theta_z,theta_x,theta_y])
 
 def euler2quat(eulerAngles:jnp.ndarray|list)->jnp.ndarray:
