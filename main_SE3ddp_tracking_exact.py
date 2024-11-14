@@ -99,19 +99,19 @@ print("Dynamics Instatiation Finished")
 
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
 
-# Q = np.diag([ 
-#     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1. 
-# ])
+Q = np.diag([ 
+    10., 10., 10., 1., 1., 1.,
+    1., 1., 1., 1., 1., 1. 
+])
 # P = np.diag([
 #     10., 10., 10., 1., 1., 1.,
 #     1., 1., 1., 1., 1., 1.  
 # ]) * 10
 
-Q = np.diag([ 
-    10., 10., 10., 1., 1., 1.,
-    0., 0., 0., 0., 0., 0. 
-]) 
+# Q = np.diag([ 
+#     10., 10., 10., 1., 1., 1.,
+#     0., 0., 0., 0., 0., 0. 
+# ]) 
 P = Q * 10
 R = np.identity(6) * 1e-5
 
@@ -437,12 +437,12 @@ def update_anim(frame):
 
     # Update position markers
     final_pos = traj[-1]
-    final_point.set_data(final_pos[0], final_pos[1])
-    final_point.set_3d_properties(final_pos[2])
+    final_point.set_data([final_pos[0]], [final_pos[1]])
+    final_point.set_3d_properties([final_pos[2]])
     
     ref_pos = ref_positions[frame]
-    ref_point.set_data(ref_pos[0], ref_pos[1])
-    ref_point.set_3d_properties(ref_pos[2])
+    ref_point.set_data([ref_pos[0]], [ref_pos[1]])
+    ref_point.set_3d_properties([ref_pos[2]])
     
     # Update reference quiver
     se3_ref = q_ref[frame]
