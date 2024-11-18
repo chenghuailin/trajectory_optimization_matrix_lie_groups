@@ -42,7 +42,7 @@ def rollout_parameter(param_name, param_value, dynamics_params, N, action_size, 
             'th_x': 0.0,
             'w_x': 0.0,
             'w_y': 0.0,
-            'w_z': 10.0,
+            'w_z': 1.0,
             'p_x': 1.0,
             'p_y': 1.0,
             'p_z': -1.0,
@@ -249,7 +249,7 @@ def main():
         os.makedirs(visualization_dir)
         print(f"Created directory: {visualization_dir}")
 
-    save_path = os.path.join(visualization_dir, f'results_rollout_all_parameters_test.pkl')
+    save_path = os.path.join(visualization_dir, f'results_rollout_all_parameters.pkl')
 
     # Use pickle to save the whole results dictionary
     with open(save_path, 'wb') as f:
