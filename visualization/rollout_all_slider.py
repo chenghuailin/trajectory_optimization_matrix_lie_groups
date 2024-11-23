@@ -7,7 +7,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import pickle
 from matplotlib.widgets import Slider
 from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, SE32manifSE3, \
-    parallel_SE32manifSE3, rotm2euler
+    parallel_SE32manifSE3, rotm2euler, parallel_SE32absangle, parallel_rotm2euler, rotm2absangle
 from scipy.linalg import expm
 
 def load_results(save_path):
@@ -68,7 +68,7 @@ for param_name in parameter_ranges.keys():
 
     # Create figure and 3D axis
     fig = plt.figure(figsize=(10, 6))
-    ax = fig.add_subplot(131, projection='3d')
+    ax = fig.add_subplot(221, projection='3d')
     plt.subplots_adjust(bottom=0.25)  # Reserve space for the slider
 
     # Initialize parameter index
@@ -78,7 +78,7 @@ for param_name in parameter_ranges.keys():
     pos = np.array([q_ref[i][:3, 3] for i in range(Nsim+1)])
     line_sol, = ax.plot(pos[:, 0], pos[:, 1], pos[:, 2], color='blue', linewidth=2, label='reference')
 
-    # Plot initial solved trajectory
+    # Plot solved trajectory
     traj_sol = results_sol['trajectories'][param_name][initial_index]
     pos = np.array([traj_step[0][:3, 3] for traj_step in traj_sol])
     line_sol, = ax.plot(pos[:, 0], pos[:, 1], pos[:, 2], color='red', linewidth=2, label='solution')
@@ -110,10 +110,25 @@ for param_name in parameter_ranges.keys():
         valfmt='%0.0f'
     )
 
-    ax2 = fig.add_subplot(132)
-    R_errs = [ ( SE32manifSE3( 
+    ax_geodesic = fig.add_subplot(222)
+    R_errs_rollout = [ ( SE32manifSE3( 
                         results_rollout['trajectories'][param_name][initial_index][i][0] 
-                    ).compose( q_ref_mnf[i].inverse() ) ) .rotation() for i in range(Nsim+1) ]
+                    ).compose( q_ref_mnf[i].inverse() ) ).rotation() for i in range(Nsim+1) ]
+    # q_traj_rollout = [results_rollout['trajectories'][param_name][initial_index][i][0] for i in range(Nsim+1)]
+    # angle_geodesic = parallel_SE32absangle( q_traj_rollout )
+    angle_geodesic = [ rotm2absangle(R_step) for R_step in R_errs_rollout ]
+    ax_angle_geodesic, = ax_geodesic.plot(range(Nsim+1), angle_geodesic, color='red', linewidth=2)
+    ax_180_geodesic, = ax_geodesic.plot(range(Nsim+1), 180 * np.ones_like(range(Nsim+1)), color='blue', linewidth=1, linestyle='dashed')
+    ax_geodesic.grid(True)
+    ax_geodesic.set_ylim([-10,200])
+    ax_geodesic.set_xlabel('Stages')
+    ax_geodesic.set_ylabel('Angle')
+    ax_geodesic.set_title(f'Absolute Geodesic Angle of Initial Rollout Error $X\\bar{{X}}^{{-1}}$')
+
+    ax_rollout = fig.add_subplot(223)
+    # R_errs = [ ( SE32manifSE3( 
+    #                     results_rollout['trajectories'][param_name][initial_index][i][0] 
+    #                 ).compose( q_ref_mnf[i].inverse() ) ).rotation() for i in range(Nsim+1) ]
     if param_name == 'th_z' or param_name == 'w_z':
         order = 'zyx'
         title_order = '(Z-Y-X)'
@@ -130,32 +145,34 @@ for param_name in parameter_ranges.keys():
     else:
         order = None
         title_order = '(Z-Y-X)'
-    euler_errs = np.array([ rotm2euler(m, order) for m in R_errs ])
+    euler_errs = np.array([ rotm2euler(m, order) for m in R_errs_rollout ])
+    # euler_errs = parallel_rotm2euler( R_errs, order )
 
-    ax_euler_z_rollout, = ax2.plot(range(Nsim+1), euler_errs[:, 0], color='red', linewidth=2, label='1-axis')
-    ax_euler_x_rollout, = ax2.plot(range(Nsim+1), euler_errs[:, 1], color='blue', linewidth=2, label='2-axis')
-    ax_euler_y_rollout, = ax2.plot(range(Nsim+1), euler_errs[:, 2], color='olive', linewidth=2, label='3-axis')
-    ax2.grid(True)
-    ax2.set_ylim([-190,190])
-    ax2.legend()
-    ax2.set_xlabel('Iteration')
-    ax2.set_ylabel('Angle')
-    ax2.set_title(f'Euler Angle Error of Initial Rollout $X\\bar{{X}}^{{-1}}$ {title_order}')
+    ax_euler_z_rollout, = ax_rollout.plot(range(Nsim+1), euler_errs[:, 0], color='red', linewidth=2, label='1-axis')
+    ax_euler_x_rollout, = ax_rollout.plot(range(Nsim+1), euler_errs[:, 1], color='blue', linewidth=2, label='2-axis')
+    ax_euler_y_rollout, = ax_rollout.plot(range(Nsim+1), euler_errs[:, 2], color='olive', linewidth=2, label='3-axis')
+    ax_rollout.grid(True)
+    ax_rollout.set_ylim([-190,190])
+    ax_rollout.legend()
+    ax_rollout.set_xlabel('Stages')
+    ax_rollout.set_ylabel('Angle')
+    ax_rollout.set_title(f'Euler Angle of Initial Rollout Error $X\\bar{{X}}^{{-1}}$ {title_order}')
 
-    ax3 = fig.add_subplot(133)
-    R_errs = [ ( SE32manifSE3( 
+    ax_sol = fig.add_subplot(224)
+    R_errs_sol = [ (SE32manifSE3( 
                         results_sol['trajectories'][param_name][initial_index][i][0] 
                     ) * q_ref_mnf[i].inverse()).rotation() for i in range(Nsim+1) ]
-    euler_errs = np.array([ rotm2euler(m, order) for m in R_errs ])
-    ax_euler_z_sol, = ax3.plot(range(Nsim+1), euler_errs[:, 0], color='red', linewidth=2, label='1-axis')
-    ax_euler_x_sol, = ax3.plot(range(Nsim+1), euler_errs[:, 1], color='blue', linewidth=2, label='2-axis')
-    ax_euler_y_sol, = ax3.plot(range(Nsim+1), euler_errs[:, 2], color='olive', linewidth=2, label='3-axis')
-    ax3.grid(True)
-    ax3.set_ylim([-190,190])
-    ax3.legend()
-    ax3.set_xlabel('Iteration')
-    ax3.set_ylabel('Angle')
-    ax3.set_title(f'Euler Angle Error of Solution $X\\bar{{X}}^{{-1}}$ {title_order}')
+    euler_errs = np.array([ rotm2euler(m, order) for m in R_errs_sol ])
+    # euler_errs = parallel_rotm2euler( R_errs, order )
+    ax_euler_z_sol, = ax_sol.plot(range(Nsim+1), euler_errs[:, 0], color='red', linewidth=2, label='1-axis')
+    ax_euler_x_sol, = ax_sol.plot(range(Nsim+1), euler_errs[:, 1], color='blue', linewidth=2, label='2-axis')
+    ax_euler_y_sol, = ax_sol.plot(range(Nsim+1), euler_errs[:, 2], color='olive', linewidth=2, label='3-axis')
+    ax_sol.grid(True)
+    ax_sol.set_ylim([-190,190])
+    ax_sol.legend()
+    ax_sol.set_xlabel('Stages')
+    ax_sol.set_ylabel('Angle')
+    ax_sol.set_title(f'Euler Angle of Solution Error $X\\bar{{X}}^{{-1}}$ {title_order}')
 
     # Update function, called when the slider value changes
     def update(val):
@@ -173,23 +190,30 @@ for param_name in parameter_ranges.keys():
 
         fig.suptitle(f'Trajectory for {param_name} = {results_sol["params"][param_name][index]:.2f}')
 
-        R_errs = [ ( SE32manifSE3( 
+        R_errs_rollout = [ ( SE32manifSE3( 
                     results_rollout['trajectories'][param_name][index][i][0] 
                 ) * q_ref_mnf[i].inverse()).rotation() for i in range(Nsim+1) ]
-        euler_errs = np.array([ rotm2euler(m) for m in R_errs ])
+        euler_errs = np.array([ rotm2euler(m, order)for m in R_errs_rollout ])
+        # euler_errs = parallel_rotm2euler( R_errs, order )
         ax_euler_z_rollout.set_data(range(Nsim+1), euler_errs[:, 0])
         ax_euler_x_rollout.set_data(range(Nsim+1), euler_errs[:, 1])
         ax_euler_y_rollout.set_data(range(Nsim+1), euler_errs[:, 2])
 
-        R_errs = [ ( SE32manifSE3( 
+        R_errs_sol = [ ( SE32manifSE3( 
                     results_sol['trajectories'][param_name][index][i][0] 
                 ) * q_ref_mnf[i].inverse()).rotation() for i in range(Nsim+1) ]
-        euler_errs = np.array([ rotm2euler(m) for m in R_errs ])
+        euler_errs = np.array([ rotm2euler(m, order) for m in R_errs_sol ])
+        # euler_errs = parallel_rotm2euler( R_errs, order )
         ax_euler_z_sol.set_data(range(Nsim+1), euler_errs[:, 0])
         ax_euler_x_sol.set_data(range(Nsim+1), euler_errs[:, 1])
         ax_euler_y_sol.set_data(range(Nsim+1), euler_errs[:, 2])
 
-        fig.canvas.draw_idle()
+        # q_traj_rollout = [results_rollout['trajectories'][param_name][index][i][0] for i in range(Nsim+1)]
+        # angles = parallel_SE32absangle( q_traj_rollout )
+        angles = [ rotm2absangle(R_step) for R_step in R_errs_rollout ]
+        ax_angle_geodesic.set_data( range(Nsim+1), angles )
+
+        # fig.canvas.draw_idle()
 
     # Connect the slider to the update function
     slider.on_changed(update)
