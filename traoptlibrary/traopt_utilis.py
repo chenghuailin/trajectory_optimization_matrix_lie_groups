@@ -8,6 +8,7 @@ from jax.numpy.linalg import norm
 from manifpy import SE3, SE3Tangent
 from concurrent.futures import ThreadPoolExecutor
 from scipy.spatial.transform import Rotation
+from functools import partial
 
 def skew( w ):
     """Get the isomorphic element in the Lie algebra for SO3, 
@@ -207,6 +208,59 @@ def quat2rotm(quat):
 #     q = np.array([q0, q1, q2, q3])   
 #     return q
 
+def SE32absangle(m) -> np.ndarray:
+    """
+    Calculate the absolute rotation angle (along geodesic) 
+    from a rotation matrix.
+    
+    Parameters:
+    m -- 4x4 SE3 matrix
+    
+    Returns:
+    angle -- Rotation angle (in degrees)
+    """
+    if m.shape != (4, 4):
+        raise ValueError("The input must be a 4x4 SE3 matrix")
+    R = m[:3,:3]
+    trace = np.trace(R)
+    angle_radian = np.arccos((trace - 1) / 2)
+    angle_degree = np.rad2deg(angle_radian)
+
+    return angle_degree
+
+def parallel_SE32absangle(m_list):
+    # Use ThreadPoolExecutor for parallel processing
+    with ThreadPoolExecutor() as executor:
+        # Apply SE32absangle conversion in parallel across each SE(3) matrix in m_list
+        angle_list = np.array(list(executor.map(SE32absangle, m_list)))
+    return angle_list
+
+def rotm2absangle(m) -> np.ndarray:
+    """
+    Calculate the absolute rotation angle (along geodesic) 
+    from a rotation matrix.
+    
+    Parameters:
+    m -- 3x3 rotation matrix
+    
+    Returns:
+    angle -- Rotation angle (in degrees)
+    """
+    if m.shape != (3, 3):
+        raise ValueError("The input must be a 3x3 rotation matrix")
+    trace = np.trace(m)
+    angle_radian = np.arccos((trace - 1) / 2)
+    angle_degree = np.rad2deg(angle_radian)
+
+    return angle_degree
+
+def parallel_rotm2absangle(m_list):
+    # Use ThreadPoolExecutor for parallel processing
+    with ThreadPoolExecutor() as executor:
+        # Apply rotm2absangle conversion in parallel across each rotation matrix in m_list
+        angle_list = np.array(list(executor.map(rotm2absangle, m_list)))
+    return angle_list
+
 def rotm2quat(m:np.ndarray) -> np.ndarray:
     """Creates a quaternion from a rotation matrix defining a given orientation.
     
@@ -240,6 +294,14 @@ def rotm2euler(m:np.ndarray, order='zxy') -> np.ndarray:
         order = 'zxy'  # Use a default rotation order
     theta_z,theta_x,theta_y = Rotation.from_matrix(m).as_euler(order,degrees=True)
     return np.array([theta_z,theta_x,theta_y])
+
+def parallel_rotm2euler(m_list, order):
+    # Use ThreadPoolExecutor for parallel processing
+    with ThreadPoolExecutor() as executor:
+        # Apply rotm2absangle conversion in parallel across each rotation matrix in m_list
+        rotm2euler_withorder = partial( rotm2euler, order=order )
+        angle_list = np.array(list(executor.map(rotm2euler_withorder, m_list)))
+    return angle_list
 
 def euler2quat(eulerAngles:jnp.ndarray|list)->jnp.ndarray:
     """
