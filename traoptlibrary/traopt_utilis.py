@@ -91,18 +91,6 @@ def coadjoint( xi ):
     """ Get the the coadjoint matrix representation of Lie Algebra."""
     return adjoint(xi).T
 
-def quat2rotm(quat):
-    """ Converts a quaternion to a rotation matrix. """
-    q = quat / norm(quat)  # Ensure the quaternion is normalized
-    q0, q1, q2, q3 = q
-
-    R = jnp.array([
-        [1 - 2 * (q2**2 + q3**2), 2 * (q1*q2 - q0*q3), 2 * (q1*q3 + q0*q2)],
-        [2 * (q1*q2 + q0*q3), 1 - 2 * (q1**2 + q3**2), 2 * (q2*q3 - q0*q1)],
-        [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
-    ])
-    return R
-
 def SE32absangle(m) -> np.ndarray:
     """
     Calculate the absolute rotation angle (along geodesic) 
@@ -155,6 +143,18 @@ def parallel_rotm2absangle(m_list):
         # Apply rotm2absangle conversion in parallel across each rotation matrix in m_list
         angle_list = np.array(list(executor.map(rotm2absangle, m_list)))
     return angle_list
+
+def quat2rotm(quat):
+    """ Converts a quaternion to a rotation matrix. """
+    q = quat / norm(quat)  # Ensure the quaternion is normalized
+    q0, q1, q2, q3 = q
+
+    R = jnp.array([
+        [1 - 2 * (q2**2 + q3**2), 2 * (q1*q2 - q0*q3), 2 * (q1*q3 + q0*q2)],
+        [2 * (q1*q2 + q0*q3), 1 - 2 * (q1**2 + q3**2), 2 * (q2*q3 - q0*q1)],
+        [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
+    ])
+    return R
 
 def rotm2quat(m:np.ndarray) -> np.ndarray:
     """Creates a quaternion from a rotation matrix defining a given orientation.
