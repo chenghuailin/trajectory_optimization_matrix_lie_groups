@@ -1,11 +1,12 @@
 import jax
-from traoptlibrary.traopt_controller import iLQR_Tracking_SE3_MS
+from traoptlibrary.traopt_controller import iLQR_Tracking_SE3_MS, AL_iLQR_Tracking_SE3_MS
 import numpy as np
 from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
 from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, \
     parallel_SE32manifSE3, rotm2euler, manifse32se3
+from traoptlibrary.traopt_constraints import InputConstraint
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
 import time
@@ -18,6 +19,25 @@ def on_iteration(iteration_count, xs, us, J_opt, accepted,
     us_hist.append(us.copy())
     info = "converged" if converged else ("accepted" if accepted else "failed")
     print("Iteration", iteration_count, info, J_opt, defect_norm, grad_wrt_input_norm, alpha, mu)
+
+def on_iteration_al(iteration_count, converged, lmbd, Imu, mu, constr_eval, 
+                    lmbd_hist, mu_hist, constr_violn_hist):
+
+    info = "converged" if converged else "accepted"
+    violation = constr_eval[constr_eval > 0.].sum()
+    n_active = (constr_eval > 0.).sum()
+
+    lmbd_hist.append(lmbd)
+    mu_hist.append(mu)
+    constr_violn_hist.append(violation)
+
+    print(  "AL Outer-Loop Iteration", iteration_count, info,
+            n_active,":", violation, 
+            np.max(lmbd), mu
+    )
+    
+    
+    
 
 seed = 24234156
 key = random.key(seed)
@@ -60,18 +80,8 @@ X = q0_ref.copy()
 for i in range(Nsim):
 
     xi_ref_rt = xi0_ref.copy()
-
-    # You can try some time-varying twists here:
-    # xi_ref_rt[0] = np.sin(i / 20) * 2
-    # xi_ref_rt[4] = np.cos(np.sqrt(i)) * 1
-    # xi_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
-
     X = X @ expm( se3_hat( xi_ref_rt ) * dt)
-
-    # Store the reference SE3 configuration
     q_ref[i + 1] = X.copy()
-
-    # Store the reference twists
     xi_ref[i + 1] = xi_ref_rt.copy()
 
 
@@ -117,6 +127,12 @@ print("Cost Instantiation Finished")
 print(f"Cost instantiation took {end_time - start_time:.4f} seconds")
 
 # =====================================================
+# Constraints Instantiation
+# =====================================================
+
+constraints = InputConstraint(-10.,10.)
+
+# =====================================================
 # Solver Instantiation
 # =====================================================
 
@@ -133,14 +149,15 @@ print(x0)
 
 us_init = np.zeros((N, action_size,))
 
-ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N, 
-                            q_ref, xi_ref, 
-                            hessians=HESSIANS,
-                            line_search=False,
-                            rollout='nonlinear')
+al_msilqr = AL_iLQR_Tracking_SE3_MS(dynamics, cost, constraints, N, 
+                                q_ref, xi_ref, 
+                                hessians=HESSIANS,
+                                rollout='nonlinear')
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
-        ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
+        al_msilqr.fit(  x0, us_init, n_ilqr_iters=200, 
+                        on_iteration_al=on_iteration_al, 
+                        on_iteration_ilqr=on_iteration)
 
 
 # =====================================================

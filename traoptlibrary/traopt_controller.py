@@ -7,6 +7,7 @@ from jax import jit
 from traoptlibrary.traopt_utilis import is_pos_def, vec_SE32quatpos, se3_vee,\
         se3_hat, SE32manifSE3, manifSE32SE3, manifse32se3, se32manifse3
 from scipy.linalg import logm, inv, expm
+from traoptlibrary.traopt_cost import ALConstrainedCost
 
 class BaseController():
 
@@ -1045,6 +1046,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
     def __init__(self, dynamics, cost, N, 
                  q_ref, xi_ref, 
                  max_reg=1e10, hessians=False,
+                 line_search=False,
                  rollout='linear', debug=None):
         """Constructs an iLQR solver for Error-State Dynamics
 
@@ -1086,6 +1088,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         self._rollout_mode = rollout
         self._debug = debug
+        self._line_search = line_search
 
         self._defect_mu0 = 10.
         self._defect_rho = 0.5
@@ -1123,7 +1126,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
     def get_xi_ref(self,i):
         return self._xi_ref[i]
 
-    def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-3,
+    def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-6,
              on_iteration=None):
         """Computes the optimal controls.
 
@@ -1180,16 +1183,6 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
             d_norm = self._compute_defect_norm( d )
             J_opt = L.sum()
-
-            # TODO: multiple shooting gradient 
-            # _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
-            # if grad_wrt_input_norm < tol_grad_norm:
-            #     converged = True
-            #     changed = False
-            #     # accepted = True
-            #     print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
-            #     break
-            # print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
@@ -1198,8 +1191,17 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
             if converged == False:
                 # Backward pass.
-                k, K = self._backward_pass(d, F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
+                k, K, V_x, V_xx = self._backward_pass(d, F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
                                            F_xx, F_ux, F_uu)
+
+                _, grad_wrt_input_norm = self._gradient_wrt_control( d, F_x, F_u, L_x, L_u, V_x, V_xx )
+                if grad_wrt_input_norm < tol_grad_norm:
+                    converged = True
+                    changed = False
+                    accepted = True
+                    print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
+                    break
+                print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
                 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -1212,40 +1214,51 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
                 merit = J_opt + d_weight * d_norm
 
-                # # Backtracking line search.
-                # for alpha in alphas:
-                #     xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
+                if self._line_search:
+                    _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, rollout="linear")
 
-                #     J_new = self._trajectory_cost( xs_new, us_new )
-                #     d_new = self._compute_defect( xs_new, us_new )
-                #     d_norm_new = self._compute_defect_norm( d_new )
-                #     J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
+                    exact_lqr_cost_change = self._expected_cost_change( 
+                        xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
+                    )
+                    d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
+                    merit = J_opt + d_weight * d_norm
 
-                #     end_time = time.perf_counter()
-                #     time_calc = end_time - start_time   
-                #     print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
+                    # Backtracking line search.
+                    for alpha in alphas:
+                        xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
 
-                #     merit_new = J_new + d_weight * d_norm_new
+                        J_new = self._trajectory_cost( xs_new, us_new )
+                        d_new = self._compute_defect( xs_new, us_new )
+                        d_norm_new = self._compute_defect_norm( d_new )
+                        J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
 
-                #     if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
-                #         if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                #             converged = True
+                        end_time = time.perf_counter()
+                        time_calc = end_time - start_time   
+                        print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
 
-                #         J_opt = J_new
-                #         xs = xs_new
-                #         us = us_new
+                        merit_new = J_new + d_weight * d_norm_new
 
-                #         # Accept this.
-                #         accepted = True
-                #         break
+                        if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
+                            if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                                converged = True
 
-                alpha = 1
-                xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
+                            J_opt = J_new
+                            xs = xs_new
+                            us = us_new
 
-                J_new = self._trajectory_cost( xs_new, us_new )
-                d_new = self._compute_defect( xs_new, us_new )
-                d_norm_new = self._compute_defect_norm( d_new )
-                # J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
+                            # Accept this.
+                            accepted = True
+                            break
+                
+                else:
+                    alpha = 1
+                    xs_new, us_new, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, alpha)
+
+                    J_new = self._trajectory_cost( xs_new, us_new )
+                    d_new = self._compute_defect( xs_new, us_new )
+                    d_norm_new = self._compute_defect_norm( d_new )
+
+                    accepted = True
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -1254,12 +1267,13 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 if np.abs((J_opt - J_new) / J_opt) < tol_J:
                     converged = True
 
-                J_opt = J_new
-                xs = xs_new
-                us = us_new
+                if accepted:    
+                    J_opt = J_new
+                    xs = xs_new
+                    us = us_new
 
-                # Accept this.
-                accepted = True
+                # # Accept this.
+                # accepted = True
 
             end_time = time.perf_counter()
             time_calc = end_time - start_time   
@@ -1268,7 +1282,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
             if on_iteration:
                 on_iteration(iteration, xs, us, J_opt,
                             accepted, converged, d_norm_new,
-                            "unknown",
+                            grad_wrt_input_norm,
                             alpha, self._mu, 
                             J_hist, xs_hist, us_hist)
                     
@@ -1583,9 +1597,16 @@ class iLQR_Tracking_SE3_MS(BaseController):
             Tuple of
                 k: feedforward gains [N, action_size].
                 K: feedback gains [N, action_size, state_size].
+                V_x: value function 1st-order derivative w.r.t. state.
+                    [N+1, state_size]
+                V_xx: value function 2nd-order derivative (hessian) w.r.t. state.
+                    [N+1, state_size, state_size]
         """
-        V_x = L_x[-1]
-        V_xx = L_xx[-1]
+        V_x = np.empty((self.N + 1, self.state_size))
+        V_xx = np.empty((self.N + 1, self.state_size, self.state_size))
+
+        V_x[self.N] = L_x[-1]
+        V_xx[self.N] = L_xx[-1]
 
         k = np.empty_like(self._k)
         K = np.empty_like(self._K)
@@ -1597,13 +1618,13 @@ class iLQR_Tracking_SE3_MS(BaseController):
                     Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(d[i], 
                                                         F_x[i], F_u[i], L_x[i],
                                                         L_u[i], L_xx[i], L_ux[i],
-                                                        L_uu[i], V_x, V_xx,
+                                                        L_uu[i], V_x[i+1], V_xx[i+1],
                                                         F_xx[i], F_ux[i], F_uu[i])
                 else:
                     Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(d[i], 
                                                          F_x[i], F_u[i], L_x[i],
                                                         L_u[i], L_xx[i], L_ux[i],
-                                                        L_uu[i], V_x, V_xx)
+                                                        L_uu[i], V_x[i+1], V_xx[i+1])
                 
                 if not is_pos_def(Q_uu + Q_uu.T):
                     # Increase regularization term.
@@ -1626,15 +1647,15 @@ class iLQR_Tracking_SE3_MS(BaseController):
             K[i] = -np.linalg.solve(Q_uu, Q_ux)
 
             # Eq (11b).
-            V_x = Q_x + K[i].T.dot(Q_uu).dot(k[i])
-            V_x += K[i].T.dot(Q_u) + Q_ux.T.dot(k[i])
+            V_x[i] = Q_x + K[i].T.dot(Q_uu).dot(k[i])
+            V_x[i] += K[i].T.dot(Q_u) + Q_ux.T.dot(k[i])
 
             # Eq (11c).
-            V_xx = Q_xx + K[i].T.dot(Q_uu).dot(K[i])
-            V_xx += K[i].T.dot(Q_ux) + Q_ux.T.dot(K[i])
-            V_xx = 0.5 * (V_xx + V_xx.T)  # To maintain symmetry.
+            V_xx[i] = Q_xx + K[i].T.dot(Q_uu).dot(K[i])
+            V_xx[i] += K[i].T.dot(Q_ux) + Q_ux.T.dot(K[i])
+            V_xx[i] = 0.5 * (V_xx[i] + V_xx[i].T)  # To maintain symmetry.
 
-        return k, K
+        return k, K, V_x, V_xx
 
     def _Q(self,
            d, 
@@ -1698,31 +1719,28 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         return Q_x, Q_u, Q_xx, Q_ux, Q_uu
     
-    def _gradient_wrt_control(self, F_x, F_u, L_x, L_u):
+    def _gradient_wrt_control(self, d, F_x, F_u, L_x, L_u, V_x, V_xx):
         """Solve adjoint equations using a for loop.
 
         Args:
+            d: dynamics defect.
             F_x: dynamics Jacobians with respect to state.
             F_u: dynamics Jacobians with respect to control.
             L_x: cost gradients with respect to state.
             L_u: cost gradients with respect to control.
+            V_x: value function 1st-order derivative w.r.t. state.
+            V_xx: value function 2nd-order derivative (hessian) w.r.t. state.
 
         Returns:
             gradient, adjoints, final adjoint variable.
         """
 
-        # P = np.zeros((self.N + 1, self._state_size))
         g = np.zeros((self.N, self._action_size))
-
-        p = L_x[self.N] # Initialize adjoint variable with terminal cost gradient
-        # P[self.N] = p
         g_norm_sum = 0
-        
-        for t in range(self.N - 1, -1, -1):  # backward recursion of Adjoint equations.
-            g[t] = L_u[t] + np.matmul(F_u[t].T, p)
-            p = L_x[t] + np.matmul(F_x[t].T, p) 
+
+        for t in range(self.N - 1, -1, -1):
+            g[t] = L_u[t] + np.matmul( F_u[t].T, V_x[t+1] + np.matmul(V_xx[t+1].T, d[t]) )
             g_norm_sum = g_norm_sum + np.linalg.norm(g[t])
-            # P[t] = p
 
         return g, g_norm_sum/self.N
     
@@ -1740,6 +1758,160 @@ class iLQR_Tracking_SE3_MS(BaseController):
         for i in range(1, self.N+1):
             xs.append([ self.get_q_ref(i), self.get_xi_ref(i) ])
         return xs
+
+
+class AL_iLQR_Tracking_SE3_MS(BaseController):
+    """
+    Finite Horizon Multiple Shooting with Constraints based on Augmented Lagrangian 
+    Iterative Linear Quadratic Regulator for Exact SE3 Dynamics.
+    """
+
+    def __init__(self, dynamics, cost, constraints, N, 
+                 q_ref, xi_ref,
+                 mu_scale=10.,
+                 max_reg=1e10, hessians=False,
+                 line_search=False,
+                 rollout='nonlinear', debug=None):
+        """Constructs an iLQR solver for Error-State Dynamics
+
+        Args:
+            dynamics: Plant error-state dynamics.
+            cost: Cost function.
+            constraints: Inequality constraints.
+            N: Horizon length.
+            q_ref: Tracking reference configuration.
+            xi_ref: Tracking reference velocity.
+            max_reg: Maximum regularization term to break early due to
+                divergence. This can be disabled by setting it to None.
+            hessians: Use the dynamic model's second order derivatives.
+                Default: only use first order derivatives. (i.e. iLQR instead
+                of DDP).
+            line_search: indicator if line search is used or not in forward rollout
+            rollout: Determine the rollout method, 'linear' or 'nonlinear'.
+            debug: Indication of debug mode on or not
+        """
+        self.dynamics = dynamics
+        self.cost = cost
+        self.constr = constraints
+        self.N = N
+        self._use_hessians = hessians and dynamics.has_hessians
+        if hessians and not dynamics.has_hessians:
+            warnings.warn("hessians requested but are unavailable in dynamics")
+
+        self._action_size = dynamics.action_size
+        self._state_size = dynamics.state_size
+        self._error_state_size = dynamics._error_state_size
+        self._constr_size = constraints.constr_size
+
+        self._mu0 = 1e-2
+        self._mu_scale = mu_scale
+        self._mu_max = 1e8
+        self._lmbd0 = np.zeros((self.N+1, self._constr_size))
+        self._Imu0 = np.tile(
+            self._mu0 * np.eye(self._constr_size), 
+            (self.N + 1, 1, 1)
+        )
+        
+        self.al = ALConstrainedCost( cost, constraints, N )
+        self.ilqr_solver = iLQR_Tracking_SE3_MS(dynamics, self.al, N, 
+                                                q_ref, xi_ref, 
+                                                max_reg=max_reg,
+                                                hessians=hessians,
+                                                line_search=line_search,
+                                                rollout='nonlinear',
+                                                debug=debug)
+
+        super(AL_iLQR_Tracking_SE3_MS, self).__init__()
+
+    @property
+    def xi_ref(self):
+        return self._xi_ref
+    
+    @property
+    def q_ref(self):
+        return self._q_ref
+
+    @property
+    def state_size(self):
+        return self._state_size
+
+    @property
+    def action_size(self):
+        return self._action_size
+
+    def fit(self, x0, us_init, 
+            n_al_iters=100, n_ilqr_iters=200, 
+            tol_J=1e-6, tol_grad_norm=1e-6, tol_constr=1e-2,
+            on_iteration_al=None, on_iteration_ilqr=None):
+
+        self.al.lmbd, self.al.Imu, self.al.mu = self._al_inital_param()
+
+        constr_converged = False
+        lmbd_hist = []
+        mu_hist = []
+        constr_violn_hist = []
+
+        for iteration in range( n_al_iters ):
+
+            print("--------------------------------------------------------")
+            print("AL Outer-Loop Iteration Start:", iteration)
+
+            xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
+                self.ilqr_solver.fit(   x0, us_init,
+                                        n_iterations=n_ilqr_iters, 
+                                        tol_J=1e-6, tol_grad_norm=1e-6,
+                                        on_iteration=on_iteration_ilqr  )
+            
+            constr_eval = [ 
+                self.constr.g( xs_ilqr[i], us_ilqr[i], i ) for i in range(self.N) 
+            ]
+            constr_eval.append( 
+                self.constr.g( xs_ilqr[self.N], None, self.N, terminal=True ) 
+            )
+            constr_eval = np.array( constr_eval )
+            
+            if np.max( constr_eval ) < tol_constr:
+                constr_converged = True
+
+            if on_iteration_al:
+                on_iteration_al( 
+                    iteration, constr_converged,
+                    self.al.lmbd, self.al.Imu, self.al.mu,
+                    constr_eval, 
+                    lmbd_hist, mu_hist, constr_violn_hist
+                )
+
+            if constr_converged:
+                break
+
+            self.al.lmbd, self.al.Imu, self.al.mu = self._al_update_param(constr_eval)
+
+        return xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr 
+
+    def _al_update_param( self, constr_eval ):
+
+        lmbd = self.al.lmbd
+        Imu = self.al.Imu
+        mu = self.al.mu
+
+        lmbd_new = lmbd.copy()
+        mu_new = min( mu * self._mu_scale, self._mu_max )
+        Imu_new = Imu.copy()
+
+        for i in range( self.N+1 ):
+            lmbd_new[i] = np.clip(
+                lmbd[i] + Imu[i] @ constr_eval[i],
+                a_min = 0., a_max=None
+            )
+            Imu_new[i] = np.diag( 
+                # lmbd[i] or lmbd_new[i] ?
+                np.where( (constr_eval[i] < 0.) & ( lmbd_new[i] == 0. ), 0., mu_new )
+            )
+        
+        return lmbd_new, Imu_new, mu_new
+
+    def _al_inital_param(self,):
+        return self._lmbd0, self._Imu0, self._mu0
 
 
 class iLQR_Tracking_ErrorState_Approx(BaseController):
@@ -3339,4 +3511,3 @@ class iLQR_Generation_ErrorState_Approx_NonlinearRollout(BaseController):
             # P[t] = p
 
         return g, g_norm_sum/self.N
-
