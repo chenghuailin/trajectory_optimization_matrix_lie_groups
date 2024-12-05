@@ -21,7 +21,7 @@ class BaseConstraint():
     #     raise NotImplementedError
     
     @abc.abstractmethod
-    def g(self, x, u, *args, **kwargs):
+    def g(self, x, u, i, terminal=False, *args, **kwargs):
         """Evaluate the stage-wise inequaltiy constraints.
 
         Args:
@@ -35,7 +35,7 @@ class BaseConstraint():
         raise NotImplementedError
     
     @abc.abstractmethod
-    def g_x(self, x, u, *args, **kwargs):
+    def g_x(self, x, u, i, terminal=False, *args, **kwargs):
         """Partial derivative of stage-wise inequaltiy constraint w.r.t x.
 
         Args:
@@ -49,7 +49,7 @@ class BaseConstraint():
         raise NotImplementedError
     
     @abc.abstractmethod
-    def g_u(self, x, u, *args, **kwargs):
+    def g_u(self, x, u, i, terminal=False, *args, **kwargs):
         """Partial derivative of stage-wise inequaltiy constraint w.r.t u.
 
         Args:
@@ -113,7 +113,7 @@ class InputConstraint(BaseConstraint):
         return self._action_size
 
     @abc.abstractmethod
-    def g(self, x, u, *args, **kwargs):
+    def g(self, x, u, i, terminal=False, *args, **kwargs):
         """Evaluate the stage-wise inequaltiy constraints.
 
         Args:
@@ -124,13 +124,16 @@ class InputConstraint(BaseConstraint):
         Returns:
             constr: evaluated constraints [num_constr_per_stage,].
         """
+        if terminal:
+            return np.zeros((self._constr_size,))
+
         return np.concatenate([
             self.lb - u, 
             u - self.ub
         ])
     
     @abc.abstractmethod
-    def g_x(self, x, u, *args, **kwargs):
+    def g_x(self, x, u, i, terminal=False, *args, **kwargs):
         """Partial derivative of stage-wise inequaltiy constraint w.r.t x.
 
         Args:
@@ -141,10 +144,13 @@ class InputConstraint(BaseConstraint):
         Returns:
             g_x: evaluated constraints [num_constr_per_stage, state_size].
         """
+        # if terminal:
+        #     return np.zeros([ self.constr_size, self.state_size ])
+
         return np.zeros([ self.constr_size, self.state_size ])
     
     @abc.abstractmethod
-    def g_u(self, x, u, *args, **kwargs):
+    def g_u(self, x, u, i, terminal=False, *args, **kwargs):
         """Partial derivative of stage-wise inequaltiy constraint w.r.t u.
 
         Args:
@@ -155,6 +161,9 @@ class InputConstraint(BaseConstraint):
         Returns:
             g_u: evaluated constraints [num_constr_per_stage, action_size].
         """
+        if terminal:
+            return np.zeros([ self.constr_size, self.action_size ])
+
         return np.vstack([ 
             -1*np.identity( self.action_size ), np.identity( self.action_size ) 
         ])
