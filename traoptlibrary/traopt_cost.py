@@ -815,6 +815,157 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         """
         return 2 * self._R
 
+
+class ALConstrainedCost(BaseCost):
+
+    """
+        Given cost and constraints, construct the Augmented Lagrangian LA:
+            LA( (X_k, xi_k), u_k, k ) = l( x, u, k )
+                                        + lambda^T * g(x, u)
+                                        + 1/2 * g(x, u).T * Imu * g(x, u)
+    """
+
+    def __init__(self, cost, constraints, N,
+                 state_size=(6,6), action_size=6, **kwargs):
+        """Constructor.
+
+        Args:
+            cost: Instantied cost
+            constraints: Instantiated constraints from traoptlibrary, 
+                e.g. input constraints
+            state_size: Tuple of State variable dimension, 
+                ( error state size, velocity state size ).
+            action_size: Input variable dimension.
+            **kwargs: Additional keyword-arguments for backup usage.
+        """
+        self._state_size = state_size[0] + state_size[1]
+        self._error_state_size = state_size[0] 
+        self._vel_state_size = state_size[1] 
+        self._action_size = action_size
+        self._constr_size = constraints.constr_size
+
+        self.constr = constraints
+        self.cost = cost
+        self.N = N
+        
+        self.lmbd = np.zeros(( N+1, self._constr_size ))
+        self.mu = 0.
+        self.Imu = np.zeros(( N+1, self._constr_size, self._constr_size))
+
+        super(ALConstrainedCost, self).__init__()
+
+    @property
+    def state_size(self):
+        """State size."""
+        return self._state_size
+    
+    @property
+    def error_state_size(self):
+        """Error-state size."""
+        return self._error_state_size
+
+    @property
+    def vel_state_size(self):
+        """Velocity state size."""
+        return self._vel_state_size
+
+    @property
+    def action_size(self):
+        """Action size."""
+        return self._action_size
+
+    @property
+    def constr_size(self):
+        """Number of constraints at each stage."""
+        return self._constr_size
+        
+    def l(self, x, u, i, terminal=False):
+
+        if terminal:
+            g_reshape = self.constr.g( x,u,i, terminal=True ).reshape( self.constr_size,1 )
+            LA = self.cost.l( x, u, i, terminal=True ) \
+                + self.lmbd[i].T @ self.constr.g( x, u, i, terminal=True ) \
+                + 0.5 * (g_reshape.T @ self.Imu[i] @ g_reshape).reshape(-1)[0]
+            return LA
+
+        g_reshape = self.constr.g( x,u,i ).reshape( self.constr_size,1 )
+        LA = self.cost.l( x,u,i ) + self.lmbd[i].T @ self.constr.g( x,u,i ) \
+            + 0.5 * (g_reshape.T @ self.Imu[i] @ g_reshape).reshape(-1)[0]
+
+        return LA
+
+    def l_x(self, x, u, i, terminal=False):
+
+        if terminal:
+            g = self.constr.g(x,u,i, terminal=True )
+            gx = self.constr.g_x( x,u,i, terminal=True )
+            lx = self.cost.l_x( x,u,i, terminal=True) \
+                + gx.T @ ( self.lmbd[i] + self.Imu[i] @ g )
+            return lx
+        
+        g = self.constr.g(x,u,i)
+        gx = self.constr.g_x( x,u,i )
+        lx = self.cost.l_x( x,u,i ) \
+            + gx.T @ ( self.lmbd[i] + self.Imu[i] @ g )
+        return lx
+
+    def l_u(self, x, u, i, terminal=False):
+
+        if terminal:
+            g = self.constr.g(x,u,i, terminal=True )
+            gu = self.constr.g_u( x,u,i, terminal=True )
+            lu = self.cost.l_u( x,u,i, terminal=True) \
+                + gu.T @ ( self.lmbd[i] + self.Imu[i] @ g )
+            return lu
+        
+        g = self.constr.g( x,u,i )
+        gu = self.constr.g_u( x,u,i )
+        lu = self.cost.l_u( x,u,i ) \
+            + gu.T @ ( self.lmbd[i] + self.Imu[i] @ g )
+        return lu
+
+    def l_uu(self, x, u, i, terminal=False):
+
+        if terminal:
+            gu = self.constr.g_u( x,u,i, terminal=True)
+            luu = self.cost.l_uu( x,u,i, terminal=True) \
+                + gu.T @ self.Imu[i] @ gu
+            return luu
+        
+        gu = self.constr.g_u( x,u,i )
+        luu = self.cost.l_uu( x,u,i ) \
+            + gu.T @ self.Imu[i] @ gu
+        return luu
+    
+    def l_xx(self, x, u, i, terminal=False):
+
+        if terminal:
+            gx = self.constr.g_x( x,u,i, terminal=True)
+            lxx = self.cost.l_xx( x,u,i, terminal=True) \
+                + gx.T @ self.Imu[i] @ gx
+            return lxx
+        
+        gx = self.constr.g_x( x,u,i )
+        lxx = self.cost.l_xx( x,u,i ) \
+            + gx.T @ self.Imu[i] @ gx
+        return lxx
+
+    def l_ux(self, x, u, i, terminal=False):
+
+        if terminal:
+            gx = self.constr.g_x( x,u,i, terminal=True)
+            gu = self.constr.g_u( x,u,i, terminal=True)
+            lux = self.cost.l_ux( x,u,i, terminal=True) \
+                + gu.T @ self.Imu[i] @ gx
+            return lux
+        
+        gx = self.constr.g_x( x,u,i )
+        gu = self.constr.g_u( x,u,i )
+        lux = self.cost.l_ux( x,u,i ) \
+            + gu.T @ self.Imu[i] @ gx
+        return lux
+
+
 class ErrorStateSE3ApproxGenerationQuadraticAutodiffCost(BaseCost):
 
     """
