@@ -144,17 +144,21 @@ def parallel_rotm2absangle(m_list):
         angle_list = np.array(list(executor.map(rotm2absangle, m_list)))
     return angle_list
 
-def quat2rotm(quat):
-    """ Converts a quaternion to a rotation matrix. """
-    q = quat / norm(quat)  # Ensure the quaternion is normalized
-    q0, q1, q2, q3 = q
+# def quat2rotm(quat):
+#     """ Converts a quaternion to a rotation matrix. """
+#     q = quat / norm(quat)  # Ensure the quaternion is normalized
+#     q0, q1, q2, q3 = q
 
-    R = jnp.array([
-        [1 - 2 * (q2**2 + q3**2), 2 * (q1*q2 - q0*q3), 2 * (q1*q3 + q0*q2)],
-        [2 * (q1*q2 + q0*q3), 1 - 2 * (q1**2 + q3**2), 2 * (q2*q3 - q0*q1)],
-        [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
-    ])
-    return R
+#     R = jnp.array([
+#         [1 - 2 * (q2**2 + q3**2), 2 * (q1*q2 - q0*q3), 2 * (q1*q3 + q0*q2)],
+#         [2 * (q1*q2 + q0*q3), 1 - 2 * (q1**2 + q3**2), 2 * (q2*q3 - q0*q1)],
+#         [2 * (q1*q3 - q0*q2), 2 * (q2*q3 + q0*q1), 1 - 2 * (q1**2 + q2**2)]
+#     ])
+#     return R
+
+def quat2rotm(quat:np.ndarray) -> np.ndarray:
+    """ Converts a or a list of scalar_first quaternion to a rotation matrix. """
+    return Rotation.from_quat(quat, scalar_first=True).as_matrix()
 
 def rotm2quat(m:np.ndarray) -> np.ndarray:
     """Creates a quaternion from a rotation matrix defining a given orientation.
