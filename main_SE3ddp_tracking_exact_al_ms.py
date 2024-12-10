@@ -12,16 +12,20 @@ import matplotlib.pyplot as plt
 import time
 
 def on_iteration(iteration_count, xs, us, J_opt, accepted, 
-                converged, defect_norm ,grad_wrt_input_norm,
-                alpha, mu, J_hist, xs_hist, us_hist):
+                converged, defect_norm, grad_wrt_input_norm,
+                alpha, mu, J_hist, xs_hist, us_hist, grad_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
+    grad_hist.append(grad_wrt_input_norm.copy())
+
     info = "converged" if converged else ("accepted" if accepted else "failed")
-    print("Iteration", iteration_count, info, J_opt, defect_norm, grad_wrt_input_norm, alpha, mu)
+    print("Iteration", iteration_count, \
+          info, J_opt, defect_norm, \
+          grad_wrt_input_norm, alpha, mu)
 
 def on_iteration_al(iteration_count, converged, lmbd, Imu, mu, constr_eval, 
-                    lmbd_hist, mu_hist, constr_violn_hist):
+                    lmbd_hist, mu_hist, constr_violn_hist, nactive_hist):
 
     info = "converged" if converged else "accepted"
     violation = constr_eval[constr_eval > 0.].sum()
@@ -30,13 +34,12 @@ def on_iteration_al(iteration_count, converged, lmbd, Imu, mu, constr_eval,
     lmbd_hist.append(lmbd)
     mu_hist.append(mu)
     constr_violn_hist.append(violation)
+    nactive_hist.append( n_active )
 
     print(  "AL Outer-Loop Iteration", iteration_count, info,
             n_active,":", violation, 
             np.max(lmbd), mu
     )
-    
-    
     
 
 seed = 24234156
@@ -113,11 +116,13 @@ Q = np.diag([
     10., 10., 10., 1., 1., 1.,
     1., 1., 1., 1., 1., 1. 
 ])
-P = np.diag([
-    10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.  
-]) * 10
-R = np.identity(6) * 1e-5
+# P = np.diag([
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1.  
+# ]) * 10
+P = Q * 10.
+# R = np.identity(6) * 1e-5
+R = np.zeros((6,6))
 
 print("Cost Instatiation")
 start_time = time.time() 
@@ -154,7 +159,9 @@ al_msilqr = AL_iLQR_Tracking_SE3_MS(dynamics, cost, constraints, N,
                                 hessians=HESSIANS,
                                 rollout='nonlinear')
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr,\
+    grad_hist_ilqr, lmbd_hist_ilqr, mu_hist_ilqr, \
+        violation_hist_ilqr, nactive_hist_ilqr = \
         al_msilqr.fit(  x0, us_init, n_ilqr_iters=200, 
                         on_iteration_al=on_iteration_al, 
                         on_iteration_ilqr=on_iteration)
@@ -196,48 +203,48 @@ ax1.legend()
 ax1.grid()
 
 plt.figure(2)
-plt.subplot(111)
+plt.subplot(211)
 plt.plot(J_hist_ilqr, label='ilqr')
 plt.title('Cost Comparison')
 plt.ylabel('Cost')
 plt.legend()
 plt.grid()
-# plt.subplot(212)
-# plt.plot(grad_hist_ilqr, label='ilqr')
-# plt.title('Gradient Comparison')
-# plt.xlabel('Iteration')
-# plt.ylabel('Gradient')
-# plt.legend()
-# plt.grid()
+plt.subplot(212)
+plt.plot(grad_hist_ilqr, label='ilqr')
+plt.title('Gradient Comparison')
+plt.xlabel('TimeStep')
+plt.ylabel('Gradient')
+plt.legend()
+plt.grid()
 
 plt.figure(3)
+plt.suptitle('Error Evolution')
+plt.subplot(131)
+for j in range(6):
+    plt.plot( [err_ilqr[i][0][j] for i in range(len(err_ilqr))] )
+plt.title('Configuration Error')
+plt.legend(['th_x','th_y','th_z','pos_x','pos_y','pos_z'])
+plt.xlabel('TimeStep')
+plt.grid()
+
+plt.subplot(132)
+for j in range(6):
+    plt.plot( [err_ilqr[i][1][j] for i in range(len(err_ilqr))] )
+plt.title('Velocity Error')
+plt.legend(['w_x','w_y','w_z','v_x','v_y','v_z'])
+plt.xlabel('TimeStep')
+plt.grid()
+
+plt.subplot(133)
 plt.plot(norm_q_err, label='Configuration Error')
 plt.plot(norm_vel_err, label='Velocity Error')
 plt.title('Error Norm Evolution')
-plt.xlabel('Iteration')
+plt.xlabel('TimeStep')
 plt.ylabel('Norm')
 plt.legend()
 plt.grid()
 
 plt.figure(4)
-plt.suptitle('Error Evolution')
-plt.subplot(121)
-for j in range(6):
-    plt.plot( [err_ilqr[i][0][j] for i in range(len(err_ilqr))] )
-plt.title('Configuration Error')
-plt.legend(['th_x','th_y','th_z','pos_x','pos_y','pos_z'])
-plt.xlabel('Iteration')
-plt.grid()
-
-plt.subplot(122)
-for j in range(6):
-    plt.plot( [err_ilqr[i][1][j] for i in range(len(err_ilqr))] )
-plt.title('Velocity Error')
-plt.legend(['w_x','w_y','w_z','v_x','v_y','v_z'])
-plt.xlabel('Iteration')
-plt.grid()
-
-plt.figure(5)
 plt.suptitle("iLQR Final State")
 
 plt.subplot(221)
@@ -260,7 +267,7 @@ plt.subplot(223)
 for i in range(3):
     plt.plot( vel_euler_ilqr[:,i] )
 plt.title('Angular Velocity - Body Frame')
-plt.xlabel('Iteration')
+plt.xlabel('TimeStep')
 plt.ylabel('Degree/s')
 plt.legend(['X-Axis','Y-Axis','Z-Axis'])
 plt.grid()
@@ -269,79 +276,41 @@ plt.subplot(224)
 for i in range(3):
     plt.plot( vel_xyz_ilqr[:,i] )
 plt.title('Translation Velocity - Body Frame')
-plt.xlabel('Iteration')
+plt.xlabel('TimeStep')
 plt.ylabel('m/s')
 plt.legend(['X','Y','Z'])
 plt.grid()
 
+plt.figure(5)
+plt.subplot(221)
+plt.plot(violation_hist_ilqr)
+plt.title('Constraint Violation')
+plt.ylabel('Violation Sum $\\Sigma [g(x)]^+$')
+plt.grid()
 
-# =====================================================
-# Visualization Trajectory with Vector
-# =====================================================
+plt.subplot(222)
+plt.plot(np.log10(mu_hist_ilqr))
+plt.title('Augmented Lagrangian Penalty Coefficient')
+plt.ylabel('$Log_{10}(\\mu)$')
+plt.grid()
 
-interval_plot = int((Nsim + 1) / 40)
+plt.subplot(223)
+plt.plot( np.max(lmbd_hist_ilqr, axis=(1,2)), label='max($\\lambda_i$)' )
+dual_variables = np.array(lmbd_hist_ilqr).reshape(len(lmbd_hist_ilqr), -1)
+plt.plot( np.linalg.norm(dual_variables, axis=1), label='$||\\lambda||_2$' )
+plt.title('Dual Variable')
+plt.xlabel('Iteration')
+plt.ylabel('Value')
+plt.grid()
 
-# Initialize the plot
-fig1 = plt.figure()
-plt.suptitle('Final iLQR Trajecotry')
-ax1 = fig1.add_subplot(121, projection='3d')
-
-# Define an initial vector and plot on figure
-initial_vector = np.array([1, 0, 0])  # Example initial vector
-ax1.quiver(0, 0, 0, initial_vector[0], initial_vector[1], initial_vector[2], color='g', label='Initial Vector')
-
-# Loop through quaternion data to plot rotated vectors
-for i in range(0, Nsim + 1, interval_plot):  
-
-    # =========== 1. Plot the reference trajectory ===========
-
-    se3_matrix = q_ref[i]
-
-    rot_matrix = se3_matrix[:3,:3]
-    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
-    
-    # Extract the position 
-    position = se3_matrix[:3, 3]
-
-    # Plot the rotated vector
-    ax1.quiver(position[0], position[1], position[2],
-              rotated_vector[0], rotated_vector[1], rotated_vector[2],
-              color='b', length=1, label='Reference Trajectory' if i == 0 else '')
-    
-    # =========== 2. Plot the simulated final configuration trajectory ===========
-
-    # se3_matrix = q_ref[i] @ expm( se3_hat( xs_ilqr[i, :6]) )
-    se3_matrix = xs_ilqr[i][0]
-    
-    rot_matrix = se3_matrix[:3,:3]  # Get the rotation matrix from the quaternion
-    rotated_vector = rot_matrix @ initial_vector  # Apply the rotation to the initial vector
-
-    position = se3_matrix[:3, 3]
-    
-    # Plot the rotated vector
-    ax1.quiver(position[0], position[1], position[2],
-              rotated_vector[0], rotated_vector[1], rotated_vector[2],
-              color='r', length=1, label='Final Configuration' if i == 0 else '')
+plt.subplot(224)
+plt.plot( nactive_hist_ilqr )
+plt.title('Active Constraints Number')
+plt.xlabel('Iteration')
+plt.ylabel('Number')
+plt.grid()
 
 
-# lim = 5
-# ax1.set_xlim([-lim, lim]) 
-# ax1.set_ylim([-lim, lim])
-# ax1.set_zlim([-lim, lim])
-ax1.legend()
-ax1.set_xlabel('X')
-ax1.set_ylabel('Y')
-ax1.set_zlabel('Z')
-
-ax2 = fig1.add_subplot(122, projection='3d')
-ax2.plot(ref_positions[:, 0], ref_positions[:, 1], ref_positions[:, 2],
-            label='Reference Trajectory', color='blue', linewidth=2)
-ax2.plot(final_positions[:, 0], final_positions[:, 1], final_positions[:, 2],
-            label='Final Trajectory', color='red', linewidth=2)
-ax2.legend()
-ax2.set_xlabel('X')
-ax2.set_ylabel('Y')
-ax2.set_zlabel('Z')
 
 # =====================================================
 # Visualization Final Trajectory with Vector as Animation
