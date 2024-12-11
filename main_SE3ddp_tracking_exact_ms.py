@@ -9,23 +9,29 @@ from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, \
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
 import time
+import sys
+import rerun as rr
+sys.path.append("visualization/rerun")
+from rerun_loader_urdf import URDFLogger
+from scipy.spatial.transform import Rotation
+
 
 def on_iteration(iteration_count, xs, us, J_opt, accepted, 
-                converged, defect_norm ,grad_wrt_input_norm,
-                alpha, mu, J_hist, xs_hist, us_hist):
+                converged, defect_norm, grad_wrt_input_norm,
+                alpha, mu, J_hist, xs_hist, us_hist, grad_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
+    grad_hist.append(grad_wrt_input_norm.copy())
+
     info = "converged" if converged else ("accepted" if accepted else "failed")
-    print("Iteration", iteration_count, info, J_opt, defect_norm, grad_wrt_input_norm, alpha, mu)
+    print("Iteration", iteration_count, \
+          info, J_opt, defect_norm, \
+          grad_wrt_input_norm, alpha, mu)
 
 seed = 24234156
 key = random.key(seed)
 jax.config.update("jax_enable_x64", True)
-
-dt = 0.01
-Nsim = 1400   # Simulation horizon
-# Nsim = 400   
 
 # ====================
 # Inertia Matrix
@@ -42,38 +48,71 @@ J = np.block([
 # Reference Generation (Also the tracking reference)
 # =====================================================
 
-quat0_ref = np.array([1, 0, 0, 0])
-p0_ref = np.array([0, 0, 0])
-w0_ref = np.array([0, 0, 1]) * 1
-v0_ref = np.array([1, 0, 0.1]) * 2
+# Nsim = 1400   # Simulation horizon
+# dt = 0.01
 
-q0_ref = quatpos2SE3( np.concatenate((quat0_ref, p0_ref)) )
-xi0_ref = np.concatenate((w0_ref, v0_ref))
+# quat0_ref = np.array([1, 0, 0, 0])
+# p0_ref = np.array([0, 0, 0])
+# w0_ref = np.array([0, 0, 1]) * 1
+# v0_ref = np.array([1, 0, 0.1]) * 2
 
-q_ref = np.zeros((Nsim + 1, 4, 4))  # SE(3)
-q_ref[0] = q0_ref
-xi_ref = np.zeros((Nsim + 1, 6,)) 
-xi_ref[0] = xi0_ref
+# q0_ref = quatpos2SE3( np.concatenate((quat0_ref, p0_ref)) )
+# xi0_ref = np.concatenate((w0_ref, v0_ref))
 
-X = q0_ref.copy()
+# q_ref = np.zeros((Nsim + 1, 4, 4))  # SE(3)
+# q_ref[0] = q0_ref
+# xi_ref = np.zeros((Nsim + 1, 6,)) 
+# xi_ref[0] = xi0_ref
 
-for i in range(Nsim):
+# X = q0_ref.copy()
 
-    xi_ref_rt = xi0_ref.copy()
+# for i in range(Nsim):
 
-    # You can try some time-varying twists here:
-    # xi_ref_rt[0] = np.sin(i / 20) * 2
-    # xi_ref_rt[4] = np.cos(np.sqrt(i)) * 1
-    # xi_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
+#     xi_ref_rt = xi0_ref.copy()
 
-    X = X @ expm( se3_hat( xi_ref_rt ) * dt)
+#     # You can try some time-varying twists here:
+#     xi_ref_rt[0] = np.sin(i / 20) * 2
+#     xi_ref_rt[4] = np.cos(np.sqrt(i)) * 1
+#     xi_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
 
-    # Store the reference SE3 configuration
-    q_ref[i + 1] = X.copy()
+#     X = X @ expm( se3_hat( xi_ref_rt ) * dt)
 
-    # Store the reference twists
-    xi_ref[i + 1] = xi_ref_rt.copy()
+#     # Store the reference SE3 configuration
+#     q_ref[i + 1] = X.copy()
 
+#     # Store the reference twists
+#     xi_ref[i + 1] = xi_ref_rt.copy()
+
+# quat0 = np.array([1., 0., 0., 0.])
+# p0 = np.array([-1., -1., -0.2])
+# q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
+
+# w0 = np.array([0., 0., 0.1]) 
+# v0 = np.array([2., 0., 0.2])
+# xi0 = np.concatenate((w0, v0))
+
+# x0 = [ q0, xi0 ]
+
+# =====================================================
+# Reference Import
+# =====================================================
+
+dt = 0.004
+
+path_to_reference_file = \
+    'visualization/optimized_trajectories/path_dense_random_columns_4obj.npy'
+    # 'visualization/optimized_trajectories/path_dense_random_columns.npy'
+    # 'visualization/optimized_trajectories/path_dense_random_columns_4obj.npy'
+with open( path_to_reference_file, 'rb' ) as f:
+    q_ref = np.load(f)
+    xi_ref = np.load(f)
+
+Nsim = q_ref.shape[0] - 1
+print("Horizon of dataset is", Nsim)
+
+q0 = q_ref[0]
+xi0 = xi_ref[0]
+x0 = [ q0, xi0 ]
 
 # =====================================================
 # Setup
@@ -100,14 +139,22 @@ print("Dynamics Instatiation Finished")
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
 
 Q = np.diag([ 
-    10., 10., 10., 1., 1., 1.,
+    25., 25., 25., 10., 10., 10.,
     1., 1., 1., 1., 1., 1. 
-])
-P = np.diag([
-    10., 10., 10., 1., 1., 1.,
-    1., 1., 1., 1., 1., 1.  
-]) * 10
+]) 
+# Q = np.identity(12) * 1e4
+# Q = np.diag([ 
+#     10., 10., 10., 10., 10., 10.,
+#     1., 1., 1., 1., 1., 1. 
+# ]) * 100
+# P = np.diag([
+#     10., 10., 10., 1., 1., 1.,
+#     1., 1., 1., 1., 1., 1.  
+# ]) * 10
+P = Q * 10
+# P = Q 
 R = np.identity(6) * 1e-5
+# R = np.zeros((6,6))
 
 print("Cost Instatiation")
 start_time = time.time() 
@@ -120,15 +167,6 @@ print(f"Cost instantiation took {end_time - start_time:.4f} seconds")
 # Solver Instantiation
 # =====================================================
 
-quat0 = np.array([1., 0., 0., 0.])
-p0 = np.array([-1., -1., -0.2])
-q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
-
-w0 = np.array([0., 0., 0.1]) 
-v0 = np.array([2., 0., 0.2])
-xi0 = np.concatenate((w0, v0))
-
-x0 = [ q0, xi0 ]
 print(x0)
 
 us_init = np.zeros((N, action_size,))
@@ -136,10 +174,10 @@ us_init = np.zeros((N, action_size,))
 ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N, 
                             q_ref, xi_ref, 
                             hessians=HESSIANS,
-                            line_search=False,
+                            line_search=True,
                             rollout='nonlinear')
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
 
@@ -156,6 +194,7 @@ norm_q_err = np.array([np.linalg.norm(err_ilqr[i][0],ord=2) for i in range( len(
 norm_vel_err = np.array([np.linalg.norm(err_ilqr[i][1],ord=2) for i in range( len(err_ilqr) )])
 
 q_euler_ilqr = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_ilqr ] )
+q_quat_ilqr = np.array([ Rotation.from_matrix(x[0][:3,:3]).as_quat() for x in xs_ilqr ] )
 q_xyz_ilqr = np.array([ x[0][:3,3] for x in xs_ilqr ] )
 vel_euler_ilqr = np.array([ x[1][:3] for x in xs_ilqr ])
 vel_xyz_ilqr = np.array([ x[1][3:] for x in xs_ilqr ])
@@ -163,6 +202,43 @@ vel_xyz_ilqr = np.array([ x[1][3:] for x in xs_ilqr ])
 # Extract positions from the reference and final trajectories
 ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
 final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory positions (Nsim+1, 3)
+
+# =====================================================
+# Rerun Logging: Need to Open the server first
+# =====================================================
+
+rr.init("trajectory_animation",  spawn=True, recording_id="drone_racing")
+# rr.init("trajectory_animation", spawn=True)
+
+drone_urdf_path = "./visualization/rerun/drone.urdf"
+urdf_logger = URDFLogger(drone_urdf_path, None)
+
+urdf_logger.entity_path_prefix = f"solution/drone_urdf"
+urdf_logger.log()
+
+for step in range(N):
+
+    rr.set_time_seconds( "sim_time", dt * step )
+
+    rr.log(
+        f"solution/position",
+        rr.Points3D(
+            final_positions[step] #,
+            # colors=vel_mapped_color,
+        ),
+    )
+
+    rr.log(
+        f"solution/drone_urdf",
+        rr.Transform3D(
+            translation=final_positions[step],
+            rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
+            axis_length=1.0,
+        ),
+    )
+
+print("Rerun logging finished")
+
 
 # =====================================================
 # Visualization by State
@@ -179,19 +255,19 @@ ax1.legend()
 ax1.grid()
 
 plt.figure(2)
-plt.subplot(111)
+plt.subplot(211)
 plt.plot(J_hist_ilqr, label='ilqr')
 plt.title('Cost Comparison')
 plt.ylabel('Cost')
 plt.legend()
 plt.grid()
-# plt.subplot(212)
-# plt.plot(grad_hist_ilqr, label='ilqr')
-# plt.title('Gradient Comparison')
-# plt.xlabel('Iteration')
-# plt.ylabel('Gradient')
-# plt.legend()
-# plt.grid()
+plt.subplot(212)
+plt.plot(grad_hist_ilqr, label='ilqr')
+plt.title('Gradient Comparison')
+plt.xlabel('Iteration')
+plt.ylabel('Gradient')
+plt.legend()
+plt.grid()
 
 plt.figure(3)
 plt.plot(norm_q_err, label='Configuration Error')

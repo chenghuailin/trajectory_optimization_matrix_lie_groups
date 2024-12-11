@@ -24,8 +24,6 @@ key = random.key(seed)
 jax.config.update("jax_enable_x64", True)
 
 dt = 0.01
-Nsim = int(14/dt)   # Simulation horizon
-# Nsim = 400   
 
 # ====================
 # Inertia Matrix
@@ -42,38 +40,88 @@ J = np.block([
 # Tracking Reference Generation 
 # =====================================================
 
-quat0_ref = np.array([1, 0, 0, 0])
-p0_ref = np.array([0, 0, 0])
-w0_ref = np.array([0, 0, 1]) * 1
-v0_ref = np.array([1, 0, 0.1]) * 2
+# Nsim = int(14/dt)   # Simulation horizon
+# # Nsim = 400   
 
-q0_ref = quatpos2SE3( np.concatenate((quat0_ref, p0_ref)) )
-xi0_ref = np.concatenate((w0_ref, v0_ref))
+# quat0_ref = np.array([1, 0, 0, 0])
+# p0_ref = np.array([0, 0, 0])
+# w0_ref = np.array([0, 0, 1]) * 1
+# v0_ref = np.array([1, 0, 0.1]) * 2
 
-q_ref = np.zeros((Nsim + 1, 4, 4))  # SE(3)
-q_ref[0] = q0_ref
-xi_ref = np.zeros((Nsim + 1, 6,)) 
-xi_ref[0] = xi0_ref
+# q0_ref = quatpos2SE3( np.concatenate((quat0_ref, p0_ref)) )
+# xi0_ref = np.concatenate((w0_ref, v0_ref))
 
-X = q0_ref.copy()
+# q_ref = np.zeros((Nsim + 1, 4, 4))  # SE(3)
+# q_ref[0] = q0_ref
+# xi_ref = np.zeros((Nsim + 1, 6,)) 
+# xi_ref[0] = xi0_ref
 
-for i in range(Nsim):
+# X = q0_ref.copy()
 
-    xi_ref_rt = xi0_ref.copy()
+# for i in range(Nsim):
 
-    # You can try some time-varying twists here:
-    # xi_ref_rt[0] = np.sin(i / 20) * 2
-    # xi_ref_rt[4] = np.cos(np.sqrt(i)) * 1
-    # xi_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
+#     xi_ref_rt = xi0_ref.copy()
 
-    X = X @ expm( se3_hat( xi_ref_rt ) * dt)
+#     # You can try some time-varying twists here:
+#     # xi_ref_rt[0] = np.sin(i / 20) * 2
+#     # xi_ref_rt[4] = np.cos(np.sqrt(i)) * 1
+#     # xi_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
 
-    # Store the reference SE3 configuration
-    q_ref[i + 1] = X.copy()
+#     X = X @ expm( se3_hat( xi_ref_rt ) * dt)
 
-    # Store the reference twists
-    xi_ref[i + 1] = xi_ref_rt.copy()
+#     # Store the reference SE3 configuration
+#     q_ref[i + 1] = X.copy()
 
+#     # Store the reference twists
+#     xi_ref[i + 1] = xi_ref_rt.copy()
+
+# quat0 = np.array([1., 0., 0., 0.])
+# p0 = np.array([-1., -1., -0.2])
+# q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
+
+# w0 = np.array([0., 0., 0.1]) 
+# v0 = np.array([0.1, 0.1, 0.1])
+
+R0 = Rotation.from_euler(
+    'zyx', [ 0., 0., 0. ], degrees=True
+    ).as_matrix()
+p0 = np.array([1., 1., -1.])
+q0 = rotmpos2SE3( R0, p0 )
+# w0 = np.array([1.7, 1.8, 1.8]) 
+# v0 = np.array([0.1, 0.1, 0.1])
+w0 = np.array([0., 0., 0.1]) 
+v0 = np.array([0.1, 0.1, 0.1])
+
+xi0 = np.concatenate((w0, v0))
+
+# quat0_ref = np.array([1, 0, 0, 0])
+# p0_ref = np.array([0, 0, 0])
+# w0_ref = np.array([0, 0, 1]) 
+# v0_ref = np.array([2, 0, 0.2]) 
+
+x0 = [ q0, xi0 ]
+
+# =====================================================
+# Other Reference Import
+# =====================================================
+
+path_to_reference_file = \
+    'visualization/optimized_trajectories/path_dense_random_columns_4obj.npy'
+    # 'visualization/optimized_trajectories/path_dense_random_columns.npy'
+    
+    
+
+with open( path_to_reference_file, 'rb' ) as f:
+    q_ref = np.load(f)
+    xi_ref = np.load(f)
+
+Nsim = q_ref.shape[0] - 1
+print("Horizon of dataset is", Nsim)
+
+q0 = q_ref[0]
+xi0 = xi_ref[0]
+
+x0 = [ q0, xi0 ]
 
 # =====================================================
 # Setup
@@ -126,31 +174,6 @@ print(f"Cost instantiation took {end_time - start_time:.4f} seconds")
 # Solver Instantiation
 # =====================================================
 
-# quat0 = np.array([1., 0., 0., 0.])
-# p0 = np.array([-1., -1., -0.2])
-# q0 = quatpos2SE3( np.concatenate((quat0, p0)) )
-
-# w0 = np.array([0., 0., 0.1]) 
-# v0 = np.array([0.1, 0.1, 0.1])
-
-R0 = Rotation.from_euler(
-    'zyx', [ 0., 0., 0. ], degrees=True
-    ).as_matrix()
-p0 = np.array([1., 1., -1.])
-q0 = rotmpos2SE3( R0, p0 )
-# w0 = np.array([1.7, 1.8, 1.8]) 
-# v0 = np.array([0.1, 0.1, 0.1])
-w0 = np.array([0., 0., 0.1]) 
-v0 = np.array([0.1, 0.1, 0.1])
-
-xi0 = np.concatenate((w0, v0))
-
-# quat0_ref = np.array([1, 0, 0, 0])
-# p0_ref = np.array([0, 0, 0])
-# w0_ref = np.array([0, 0, 1]) 
-# v0_ref = np.array([2, 0, 0.2]) 
-
-x0 = [ q0, xi0 ]
 print(f'Initial State:\n{x0}')
 
 us_init = np.zeros((N, action_size,))
