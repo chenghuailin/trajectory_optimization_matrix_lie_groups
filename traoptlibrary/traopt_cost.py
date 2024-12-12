@@ -614,7 +614,7 @@ class SE3TrackingQuadraticGaussNewtonCost(BaseCost):
         self._R = R
         self._P = P
 
-        super(ErrorStateSE3TrackingQuadraticGaussNewtonCost, self).__init__()
+        super(SE3TrackingQuadraticGaussNewtonCost, self).__init__()
 
     @property
     def state_size(self):
