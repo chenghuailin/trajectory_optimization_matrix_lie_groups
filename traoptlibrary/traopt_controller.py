@@ -8,6 +8,7 @@ from traoptlibrary.traopt_utilis import is_pos_def, vec_SE32quatpos, se3_vee,\
         se3_hat, SE32manifSE3, manifSE32SE3, manifse32se3, se32manifse3
 from scipy.linalg import logm, inv, expm
 from traoptlibrary.traopt_cost import ALConstrainedCost
+from manifpy import SO3, SO3Tangent
 
 class BaseController():
 
@@ -34,6 +35,9 @@ class PDViolationError(Exception):
     """Custom exception class for handling positive definite violation errors"""    
     pass
 
+# =================================================================================
+# Euclidean Space Controller
+# =================================================================================
 
 class iLQR(BaseController):
 
@@ -514,6 +518,518 @@ class iLQR(BaseController):
 
         return g, g_norm_sum/self.N
 
+# =================================================================================
+# SO3 Controller
+# =================================================================================
+
+class iLQR_Tracking_SO3(BaseController):
+
+    """
+    Finite Horizon Iterative Linear Quadratic Regulator for Exact SO3 Dynamics.
+    """
+
+    def __init__(self, dynamics, cost, N, max_reg=1e10, hessians=False,
+                 rollout='nonlinear', debug=None):
+        """Constructs an iLQR solver for Error-State Dynamics
+
+        Args:
+            dynamics: Plant dynamics.
+            cost: Cost function.
+            N: Horizon length.
+            max_reg: Maximum regularization term to break early due to
+                divergence. This can be disabled by setting it to None.
+            hessians: Use the dynamic model's second order derivatives.
+                Default: only use first order derivatives. (i.e. iLQR instead
+                of DDP).
+            rollout: Determine the rollout method, 'linear' or 'nonlinear'.
+            debug: Indication of debug mode on or not
+        """
+        self.dynamics = dynamics
+        self.cost = cost
+        self.N = N
+        self._use_hessians = hessians and dynamics.has_hessians
+        if hessians and not dynamics.has_hessians:
+            warnings.warn("hessians requested but are unavailable in dynamics")
+
+        # Regularization terms: Levenberg-Marquardt parameter.
+        # See II F. Regularization Schedule.
+        self._mu = 1.0
+        self._mu_min = 1e-6
+        self._mu_max = max_reg
+        self._delta_0 = 2.0
+        self._delta = self._delta_0
+
+        self._action_size = dynamics.action_size
+        self._state_size = dynamics.state_size
+        self._error_state_size  = dynamics._error_state_size
+
+        self._rollout_mode = rollout
+        self._debug = debug
+
+        self._k = np.zeros((N, self._action_size))
+        self._K = np.zeros((N, self._action_size, self._state_size))
+
+        super(iLQR_Tracking_SO3, self).__init__()
+
+    def fit(self, x0, us_init, 
+            n_iterations=100, 
+            tol_J=1e-6, tol_grad_norm=1e-3,
+            on_iteration=None):
+        """Computes the optimal controls.
+
+        Args:
+            x0: Initial state, list of configuration and velocity, [q, xi],
+                q:  SE3, [4, 4],
+                xi: twist velocity, stack by anguler and linear velocity, [w, v]
+            us_init: Initial control path [N, action_size].
+            n_iterations: Maximum number of interations. Default: 100.
+            tol: Tolerance. Default: 1e-6.
+            on_iteration: Callback at the end of each iteration for info update
+
+        Returns:
+            Tuple of
+                xs: optimal state path [N+1, state_size].
+                us: optimal control path [N, action_size].
+        """
+        # Reset regularization term.
+        self._mu = 1.0
+        self._delta = self._delta_0
+        # self._mu = 0.0
+
+        # Add time 
+        start_time = time.perf_counter()
+
+        # Backtracking line search candidates 0 < alpha <= 1.
+        # alphas = 1.1**(-np.arange(10)**2)
+        alphas = 1.1**(-np.arange(13)**2)
+
+        us = us_init.copy()
+        k = self._k
+        K = self._K
+
+        J_hist = []
+        xs_hist = []
+        us_hist = []
+        grad_hist = []
+
+        converged = False
+
+        xs = self._init_rollout( x0, us )
+        xs_hist.append(xs.copy())
+        us_hist.append(us.copy())
+
+        for iteration in range(n_iterations):
+            accepted = False
+            
+            end_time = time.perf_counter()
+            time_calc = end_time - start_time
+            print("Start Iteration:", iteration, ", Used Time:", time_calc )
+
+            (F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
+                L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
+            J_opt = L.sum()
+
+            _, grad_wrt_input_norm = self._gradient_wrt_control( F_x, F_u, L_x, L_u )
+            grad_hist.append(grad_wrt_input_norm)
+            if grad_wrt_input_norm < tol_grad_norm:
+                converged = True
+                print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
+                break
+            print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
+            
+            end_time = time.perf_counter()
+            time_calc = end_time - start_time
+            print("Iteration:", iteration, "Linearization Finished, Used Time:", time_calc, "Cost:", J_opt )
+
+            if converged == False:
+                # Backward pass.
+                k, K = self._backward_pass(F_x, F_u, L_x, L_u, L_xx, L_ux, L_uu,
+                                           F_xx, F_ux, F_uu)
+                
+                end_time = time.perf_counter()
+                time_calc = end_time - start_time   
+                print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
+
+                for alpha in alphas:
+                    xs_new, us_new = self._rollout(xs, us, k, K, F_x, F_u, alpha)
+                    J_new = self._trajectory_cost(xs_new, us_new)
+
+                    end_time = time.perf_counter()
+                    time_calc = end_time - start_time   
+                    print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
+
+                    if J_new < J_opt:
+                        if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                            converged = True
+
+                        J_opt = J_new
+                        xs = xs_new
+                        us = us_new
+
+                        # Accept this.
+                        accepted = True
+                        break
+
+            end_time = time.perf_counter()
+            time_calc = end_time - start_time   
+            print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
+           
+            if on_iteration:
+                on_iteration(iteration, xs, us, J_opt,
+                            accepted, converged, grad_wrt_input_norm,
+                            alpha, self._mu, 
+                            J_hist, xs_hist, us_hist)
+                    
+            if converged:
+                break
+
+            if not accepted:
+                warnings.warn("Couldn't find descent direction, regularization and line search step exhausted")
+                break
+
+        # Store fit parameters.
+        self._k = k
+        self._K = K
+
+        return xs, us, J_hist, xs_hist, us_hist, grad_hist
+    
+    def _init_rollout(self, x0, us):
+        """ Initially rollout a dynamically feasible trajectory.
+
+        Args:
+            x0: initial state, [q0, vel0]
+
+        Returns:
+            xs: initial states trajectory
+        """
+        xs = [None] * (self.N + 1)
+        xs[0] = x0
+        for i in range(self.N):
+            xs[i+1] = self.dynamics.f(xs[i], us[i], i)
+        return xs
+
+    def _rollout(self, xs, us, k, K, F_x, F_u, alpha=1.0):
+        """Applies the controls for a given trajectory.
+
+        Args:
+            xs: Nominal state path [N+1, state_size].
+            us: Nominal control path [N, action_size].
+            k: Feedforward gains [N, action_size].
+            K: Feedback gains [N, action_size, state_size].
+            alpha: Line search coefficient.
+
+        Returns:
+            Tuple of
+                xs: state path [N+1, state_size].
+                us: control path [N, action_size].
+        """
+        xs_new = [None] * (self.N + 1)
+        us_new = np.zeros_like(us)
+
+        xs_new[0] = xs[0].copy()
+
+        for i in range(self.N):
+
+            q_new, xi_new = xs_new[i]
+            q, xi = xs[i]
+            q_next, xi_next = xs[i+1]
+
+            q_err = (q_new - q).coeffs()
+            xi_err = (xi_new - xi).coeffs()
+            xs_err = np.concatenate((q_err, xi_err))
+
+            us_err = alpha * k[i] + K[i].dot(xs_err)
+            us_new[i] = us[i] + us_err
+
+            if self._rollout_mode == 'linear':
+
+                q_next_new = q_next + SO3Tangent( F_x[i,:3,:] @ xs_err + F_u[i,:3,:] @ us_err )
+                xi_next_new = xi_next + F_x[i,3:,:] @ xs_err + F_u[i,3:,:] @ us_err
+                xs_new[i + 1] = [q_next_new, xi_next_new].copy()
+
+            elif self._rollout_mode == 'nonlinear':
+
+                q_next, xi_next = self.dynamics.f( 
+                    [ q_new, xi_new ],
+                    us_new[i],
+                    i
+                )
+                xs_new[i + 1] = [q_next, xi_next].copy()
+                
+        return xs_new, us_new
+
+    def _trajectory_cost(self, xs, us):
+        """Computes the given trajectory's cost.
+
+        Args:
+            xs: State path [N+1, state_size].
+            us: Control path [N, action_size].
+
+        Returns:
+            Trajectory's total cost.
+        """
+        J = map(lambda args: self.cost.l(*args), zip(xs[:-1], us,
+                                                     range(self.N)))
+        return sum(J) + self.cost.l(xs[-1], None, self.N, terminal=True)
+
+    def _linearization(self, xs, us):
+        """Apply the forward dynamics to have a trajectory from the starting
+        state x0 by applying the control path us.
+
+        Args:
+            xs: Nominal state trajectory [N+1, [q, vel]].
+            us: Control path [N, action_size].
+
+        Returns:
+            Tuple of:
+                xs: State path [N+1, state_size].
+                F_x: Jacobian of state path w.r.t. x
+                    [N, state_size, state_size].
+                F_u: Jacobian of state path w.r.t. u
+                    [N, state_size, action_size].
+                L: Cost path [N+1].
+                L_x: Jacobian of cost path w.r.t. x [N+1, state_size].
+                L_u: Jacobian of cost path w.r.t. u [N, action_size].
+                L_xx: Hessian of cost path w.r.t. x, x
+                    [N+1, state_size, state_size].
+                L_ux: Hessian of cost path w.r.t. u, x
+                    [N, action_size, state_size].
+                L_uu: Hessian of cost path w.r.t. u, u
+                    [N, action_size, action_size].
+                F_xx: Hessian of state path w.r.t. x, x if Hessians are used
+                    [N, state_size, state_size, state_size].
+                F_ux: Hessian of state path w.r.t. u, x if Hessians are used
+                    [N, state_size, action_size, state_size].
+                F_uu: Hessian of state path w.r.t. u, u if Hessians are used
+                    [N, state_size, action_size, action_size].
+        """
+        state_size = self.dynamics.state_size
+        action_size = self.dynamics.action_size
+        N = us.shape[0]
+
+        F_x = np.empty((N, state_size, state_size))
+        F_u = np.empty((N, state_size, action_size))
+
+        if self._use_hessians:
+            F_xx = np.empty((N, state_size, state_size, state_size))
+            F_ux = np.empty((N, state_size, action_size, state_size))
+            F_uu = np.empty((N, state_size, action_size, action_size))
+        else:
+            F_xx = None
+            F_ux = None
+            F_uu = None
+
+        L = np.empty(N + 1)
+        L_x = np.empty((N + 1, state_size))
+        L_u = np.empty((N, action_size))
+        L_xx = np.empty((N + 1, state_size, state_size))
+        L_ux = np.empty((N, action_size, state_size))
+        L_uu = np.empty((N, action_size, action_size))
+
+        for i in range(N):
+            x = xs[i]
+            u = us[i]
+
+            F_x[i] = self.dynamics.f_x(x, u, i)
+            F_u[i] = self.dynamics.f_u(x, u, i)                     
+
+            L[i] = self.cost.l(x, u, i, terminal=False)
+            L_x[i] = self.cost.l_x(x, u, i, terminal=False)
+            L_u[i] = self.cost.l_u(x, u, i, terminal=False)
+            L_xx[i] = self.cost.l_xx(x, u, i, terminal=False)
+            L_ux[i] = self.cost.l_ux(x, u, i, terminal=False)
+            L_uu[i] = self.cost.l_uu(x, u, i, terminal=False)
+
+            if self._use_hessians:
+                F_xx[i] = self.dynamics.f_xx(x, u, i)
+                F_ux[i] = self.dynamics.f_ux(x, u, i)
+                F_uu[i] = self.dynamics.f_uu(x, u, i)
+
+        x = xs[-1]
+        L[-1] = self.cost.l(x, None, N, terminal=True)
+        L_x[-1] = self.cost.l_x(x, None, N, terminal=True)
+        L_xx[-1] = self.cost.l_xx(x, None, N, terminal=True)
+
+        return F_x, F_u, L, L_x, L_u, L_xx, L_ux, L_uu, F_xx, F_ux, F_uu
+
+    def _backward_pass(self,
+                       F_x,
+                       F_u,
+                       L_x,
+                       L_u,
+                       L_xx,
+                       L_ux,
+                       L_uu,
+                       F_xx=None,
+                       F_ux=None,
+                       F_uu=None):
+        """Computes the feedforward and feedback gains k and K.
+
+        Args:
+            F_x: Jacobian of state path w.r.t. x [N, state_size, state_size].
+            F_u: Jacobian of state path w.r.t. u [N, state_size, action_size].
+            L_x: Jacobian of cost path w.r.t. x [N+1, state_size].
+            L_u: Jacobian of cost path w.r.t. u [N, action_size].
+            L_xx: Hessian of cost path w.r.t. x, x
+                [N+1, state_size, state_size].
+            L_ux: Hessian of cost path w.r.t. u, x [N, action_size, state_size].
+            L_uu: Hessian of cost path w.r.t. u, u
+                [N, action_size, action_size].
+            F_xx: Hessian of state path w.r.t. x, x if Hessians are used
+                [N, state_size, state_size, state_size].
+            F_ux: Hessian of state path w.r.t. u, x if Hessians are used
+                [N, state_size, action_size, state_size].
+            F_uu: Hessian of state path w.r.t. u, u if Hessians are used
+                [N, state_size, action_size, action_size].
+
+        Returns:
+            Tuple of
+                k: feedforward gains [N, action_size].
+                K: feedback gains [N, action_size, state_size].
+        """
+        V_x = L_x[-1]
+        V_xx = L_xx[-1]
+
+        k = np.empty_like(self._k)
+        K = np.empty_like(self._K)
+
+        for i in range(self.N - 1, -1, -1):
+
+            while True:
+                if self._use_hessians:
+                    Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
+                                                        L_u[i], L_xx[i], L_ux[i],
+                                                        L_uu[i], V_x, V_xx,
+                                                        F_xx[i], F_ux[i], F_uu[i])
+                else:
+                    Q_x, Q_u, Q_xx, Q_ux, Q_uu = self._Q(F_x[i], F_u[i], L_x[i],
+                                                        L_u[i], L_xx[i], L_ux[i],
+                                                        L_uu[i], V_x, V_xx)
+                
+                if not is_pos_def(Q_uu + Q_uu.T):
+                    # Increase regularization term.
+                    self._delta = max(1.0, self._delta) * self._delta_0
+                    self._mu = max(self._mu_min, self._mu * self._delta)
+
+
+                    if self._mu_max and self._mu >= self._mu_max:
+                        warnings.warn("exceeded max regularization term")
+                        break
+                else:
+                    self._delta = min(1.0, self._delta) / self._delta_0
+                    self._mu *= self._delta
+                    if self._mu <= self._mu_min:
+                            self._mu = 0.0
+                    break
+
+            # Eq (6).
+            k[i] = -np.linalg.solve(Q_uu, Q_u)
+            K[i] = -np.linalg.solve(Q_uu, Q_ux)
+
+            # Eq (11b).
+            V_x = Q_x + K[i].T.dot(Q_uu).dot(k[i])
+            V_x += K[i].T.dot(Q_u) + Q_ux.T.dot(k[i])
+
+            # Eq (11c).
+            V_xx = Q_xx + K[i].T.dot(Q_uu).dot(K[i])
+            V_xx += K[i].T.dot(Q_ux) + Q_ux.T.dot(K[i])
+            V_xx = 0.5 * (V_xx + V_xx.T)  # To maintain symmetry.
+
+        return np.array(k), np.array(K)
+
+    def _Q(self,
+           f_x,
+           f_u,
+           l_x,
+           l_u,
+           l_xx,
+           l_ux,
+           l_uu,
+           V_x,
+           V_xx,
+           f_xx=None,
+           f_ux=None,
+           f_uu=None):
+        """Computes second order expansion.
+
+        Args:
+            F_x: Jacobian of state w.r.t. x [state_size, state_size].
+            F_u: Jacobian of state w.r.t. u [state_size, action_size].
+            L_x: Jacobian of cost w.r.t. x [state_size].
+            L_u: Jacobian of cost w.r.t. u [action_size].
+            L_xx: Hessian of cost w.r.t. x, x [state_size, state_size].
+            L_ux: Hessian of cost w.r.t. u, x [action_size, state_size].
+            L_uu: Hessian of cost w.r.t. u, u [action_size, action_size].
+            V_x: Jacobian of the value function at the next time step
+                [state_size].
+            V_xx: Hessian of the value function at the next time step w.r.t.
+                x, x [state_size, state_size].
+            F_xx: Hessian of state w.r.t. x, x if Hessians are used
+                [state_size, state_size, state_size].
+            F_ux: Hessian of state w.r.t. u, x if Hessians are used
+                [state_size, action_size, state_size].
+            F_uu: Hessian of state w.r.t. u, u if Hessians are used
+                [state_size, action_size, action_size].
+
+        Returns:
+            Tuple of
+                Q_x: [state_size].
+                Q_u: [action_size].
+                Q_xx: [state_size, state_size].
+                Q_ux: [action_size, state_size].
+                Q_uu: [action_size, action_size].
+        """
+        # Eqs (5a), (5b) and (5c).
+        Q_x = l_x + f_x.T.dot(V_x)
+        Q_u = l_u + f_u.T.dot(V_x)
+        Q_xx = l_xx + f_x.T.dot(V_xx).dot(f_x)
+
+        # Eqs (11b) and (11c).
+        reg = self._mu * np.eye(self.dynamics.state_size)
+        Q_ux = l_ux + f_u.T.dot(V_xx + reg).dot(f_x)
+        Q_uu = l_uu + f_u.T.dot(V_xx + reg).dot(f_u)
+        # Q_uu = 0.5 * (Q_uu + Q_uu.T) 
+
+        if self._use_hessians:
+            Q_xx += np.tensordot(V_x, f_xx, axes=1)
+            Q_ux += np.tensordot(V_x, f_ux, axes=1)
+            Q_uu += np.tensordot(V_x, f_uu, axes=1)
+
+        return Q_x, Q_u, Q_xx, Q_ux, Q_uu
+    
+    def _gradient_wrt_control(self, F_x, F_u, L_x, L_u):
+        """Solve adjoint equations using a for loop.
+
+        Args:
+            F_x: dynamics Jacobians with respect to state.
+            F_u: dynamics Jacobians with respect to control.
+            L_x: cost gradients with respect to state.
+            L_u: cost gradients with respect to control.
+
+        Returns:
+            gradient, adjoints, final adjoint variable.
+        """
+
+        # P = np.zeros((self.N + 1, self._state_size))
+        g = np.zeros((self.N, self._action_size))
+
+        p = L_x[self.N] # Initialize adjoint variable with terminal cost gradient
+        # P[self.N] = p
+        g_norm_sum = 0
+        
+        for t in range(self.N - 1, -1, -1):  # backward recursion of Adjoint equations.
+            g[t] = L_u[t] + np.matmul(F_u[t].T, p)
+            p = L_x[t] + np.matmul(F_x[t].T, p) 
+            g_norm_sum = g_norm_sum + np.linalg.norm(g[t])
+            # P[t] = p
+
+        return g, g_norm_sum/self.N
+
+
+
+# =================================================================================
+# SE3 Controller
+# =================================================================================
 
 class iLQR_Tracking_SE3(BaseController):
 
@@ -1092,7 +1608,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         self._defect_mu0 = 10.
         self._defect_rho = 0.5
-        self._defect_gamma = 0.1
+        self._defect_gamma = 0.05
         self._defect_min = 10.
 
         self._k = np.zeros((N, self._action_size))
@@ -1126,8 +1642,9 @@ class iLQR_Tracking_SE3_MS(BaseController):
     def get_xi_ref(self,i):
         return self._xi_ref[i]
 
-    def fit(self, x0, us_init, n_iterations=100, tol_J=1e-6, tol_grad_norm=1e-6,
-             on_iteration=None):
+    def fit(self, x0, us_init, n_iterations=100, 
+            tol_J=1e-6, tol_grad_norm=1e-6, tol_d_norm=1e-6,
+            on_iteration=None):
         """Computes the optimal controls.
 
         Args:
@@ -1163,6 +1680,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
         J_hist = []
         xs_hist = []
         us_hist = []
+        grad_hist = []
 
         converged = False
 
@@ -1195,9 +1713,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
                                            F_xx, F_ux, F_uu)
 
                 _, grad_wrt_input_norm = self._gradient_wrt_control( d, F_x, F_u, L_x, L_u, V_x, V_xx )
-                if grad_wrt_input_norm < tol_grad_norm:
+                if grad_wrt_input_norm < tol_grad_norm and d_norm < tol_d_norm:
                     converged = True
-                    changed = False
                     accepted = True
                     print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
                     break
@@ -1207,12 +1724,12 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 time_calc = end_time - start_time   
                 print("Iteration:", iteration, "Backward Pass Finished, Used Time:", time_calc )
 
-                _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, rollout="linear")
-                exact_lqr_cost_change = self._expected_cost_change( 
-                    xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
-                )
-                d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
-                merit = J_opt + d_weight * d_norm
+                # _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, rollout="linear")
+                # exact_lqr_cost_change = self._expected_cost_change( 
+                #     xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
+                # )
+                # d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
+                # merit = J_opt + d_weight * d_norm
 
                 if self._line_search:
                     _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, rollout="linear")
@@ -1220,7 +1737,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
                     exact_lqr_cost_change = self._expected_cost_change( 
                         xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
                     )
-                    d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
+                    d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm )
                     merit = J_opt + d_weight * d_norm
 
                     # Backtracking line search.
@@ -1239,7 +1756,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
                         merit_new = J_new + d_weight * d_norm_new
 
                         if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
-                            if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                            if np.abs((J_opt - J_new) / J_opt) < tol_J and d_norm <  tol_d_norm:
                                 converged = True
 
                             J_opt = J_new
@@ -1260,12 +1777,12 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
                     accepted = True
 
+                    if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                        converged = True
+
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
                 print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
-
-                if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                    converged = True
 
                 if accepted:    
                     J_opt = J_new
@@ -1284,7 +1801,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
                             accepted, converged, d_norm_new,
                             grad_wrt_input_norm,
                             alpha, self._mu, 
-                            J_hist, xs_hist, us_hist)
+                            J_hist, xs_hist, us_hist, grad_hist)
                     
             if converged:
                 break
@@ -1297,7 +1814,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
         self._k = k
         self._K = K
 
-        return xs, us, J_hist, xs_hist, us_hist
+        return xs, us, J_hist, xs_hist, us_hist, grad_hist
 
     def _rollout(self, xs, us, k, K, d, 
                  F_x, F_u, alpha=1.0,
@@ -1434,9 +1951,9 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
     def _update_defect_weight( self, expected_cost_change, d_norm ):
         """Computes the expected cost change
-        """
+        """                   
         defect_weight = self._defect_mu0 \
-            + np.abs(expected_cost_change[0]) / ( (1 - self._defect_rho) * d_norm )
+            + np.abs(expected_cost_change[0]+0.5*expected_cost_change[1]) / ( (1 - self._defect_rho) * d_norm )
         return defect_weight
 
     def _compute_defect(self, xs, us):
@@ -1849,14 +2366,15 @@ class AL_iLQR_Tracking_SE3_MS(BaseController):
         constr_converged = False
         lmbd_hist = []
         mu_hist = []
-        constr_violn_hist = []
+        violation_hist = []
+        nactive_hist = []
 
         for iteration in range( n_al_iters ):
 
             print("--------------------------------------------------------")
             print("AL Outer-Loop Iteration Start:", iteration)
 
-            xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr = \
+            xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
                 self.ilqr_solver.fit(   x0, us_init,
                                         n_iterations=n_ilqr_iters, 
                                         tol_J=1e-6, tol_grad_norm=1e-6,
@@ -1878,7 +2396,7 @@ class AL_iLQR_Tracking_SE3_MS(BaseController):
                     iteration, constr_converged,
                     self.al.lmbd, self.al.Imu, self.al.mu,
                     constr_eval, 
-                    lmbd_hist, mu_hist, constr_violn_hist
+                    lmbd_hist, mu_hist, violation_hist, nactive_hist
                 )
 
             if constr_converged:
@@ -1886,7 +2404,9 @@ class AL_iLQR_Tracking_SE3_MS(BaseController):
 
             self.al.lmbd, self.al.Imu, self.al.mu = self._al_update_param(constr_eval)
 
-        return xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr 
+        return xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr, \
+                lmbd_hist, mu_hist, violation_hist, nactive_hist
+                
 
     def _al_update_param( self, constr_eval ):
 
@@ -1913,6 +2433,10 @@ class AL_iLQR_Tracking_SE3_MS(BaseController):
     def _al_inital_param(self,):
         return self._lmbd0, self._Imu0, self._mu0
 
+
+# =================================================================================
+# Error Statte Controller 
+# =================================================================================
 
 class iLQR_Tracking_ErrorState_Approx(BaseController):
 
