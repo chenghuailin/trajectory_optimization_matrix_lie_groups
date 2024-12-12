@@ -8,7 +8,8 @@ from traoptlibrary.traopt_utilis import adjoint, quatpos2SE3, se3_vee, SE32manif
 from jax.scipy.linalg import expm
 from scipy.linalg import logm
 from functools import partial
-from manifpy import SE3, SE3Tangent
+from manifpy import SE3, SE3Tangent, SO3, SO3Tangent
+from scipy.spatial.transform import Rotation 
 
 class BaseCost():
 
@@ -271,21 +272,31 @@ class AutoDiffCost(BaseCost):
             return np.zeros((self._action_size, self._action_size))
 
         return self._l_uu(x,u,i)
-    
 
-class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
+# =================================================================================
+# SO3 Cost
+# =================================================================================
+
+class SO3TrackingQuadraticGaussNewtonCost(BaseCost):
 
     """
-        Instantaneous Stage Cost defined on Lie Algebra for SE(3) Error-state Dynamics.
+        Stage Cost defined on Lie Algebra for SE(3) ErrorDynamics.
         - Implemented with Jax for autodiff.
         - 2nd order quadratic cost, penalizing both position deviation and velocity deviation.
         - Used for tracking the given reference trajectory
-        - Implemented for error-state \psi = Log(\bar{X}^{-1} X) 
+        - Used for exact dynamics, i.e. state is \Psi
+        - Stage cost 
+                l( (X_k, xi_k), u_k, k ) = ||Log(Xbar_k^{-1} X_k)||^2_Q1 
+                                            + ||xi_k - xibar_k||^2_Q2
+                                            + ||u||^2_R
+        - Terminal cost
+                l( (X_k, xi_k), u_k, k ) = ||Log(Xbar_N^{-1} X_N)||^2_P1 
+                                            + ||xi_N - xibar_N||^2_P2
     """
 
-    def __init__(self, Q, R, P, xi_ref,
-                 state_size=(6,6), action_size=6, **kwargs):
-        """Constructs an AutoDiffCost.
+    def __init__(self, Q, R, P, q_ref, xi_ref,
+                 state_size=(3,3), action_size=3, **kwargs):
+        """Constructor.
 
         Args:
             Q: State weighting matrix for the stage cost. Shape: [state_size, state_size].
@@ -294,41 +305,28 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
                 This matrix penalizes the magnitude of control inputs at each time step.
             P: State weighting matrix for the terminal cost. Shape: [state_size, state_size].
                 This matrix penalizes the state deviation (pos & vel) from the reference at the final time step.
-            xi_ref: List of velocity reference, described in Lie Algebra,
-                 (N, velocity_size, 1)
+            q_ref: configuration reference, list of SO(3) matrix,
+                 (N, 3, 3)
+            xi_ref: velocity reference along the trajectory, described in Lie Algebra,
+                 (N, velocity_size,)
             state_size: Tuple of State variable dimension, 
                 ( error state size, velocity state size ).
             action_size: Input variable dimension.
-            **kwargs: Additional keyword-arguments to pass to
-                `theano.function()`.
+            **kwargs: Additional keyword-arguments for backup usage.
         """
         self._state_size = state_size[0] + state_size[1]
-        self._error_state_size = state_size[0] 
+        self._pos_state_size = state_size[0] 
         self._vel_state_size = state_size[1] 
         self._action_size = action_size
 
-        self._xi_ref = xi_ref
-        self._Q = jnp.array(Q)
-        self._R = jnp.array(R)
-        self._P = jnp.array(P)
+        self._q_ref = [ SO3( Rotation.from_matrix(q).as_quat()) for q in q_ref ] 
+        self._xi_ref = [ SO3Tangent(xi) for xi in xi_ref ]
 
-        self._l = jit(self._l)
+        self._Q = Q
+        self._R = R
+        self._P = P
 
-        self._l_x = jit(jacfwd(self._l))
-        self._l_u = jit(jacfwd(self._l, argnums=1))
-
-        self._l_xx = jit(hessian(self._l, argnums=0))
-        self._l_ux = jit(jacfwd( jacfwd(self._l, argnums=1) ))
-        self._l_uu = jit(hessian(self._l, argnums=1))
-
-        # Terminal cost only depends on x, so we only need to evaluate the x
-        # partial derivatives.
-
-        self._l_terminal = jit(self._l_terminal)
-        self._l_x_terminal = jit(jacfwd(self._l_terminal))
-        self._l_xx_terminal = jit(hessian(self._l_terminal))
-
-        super(ErrorStateSE3ApproxTrackingQuadraticAutodiffCost, self).__init__()
+        super(SO3TrackingQuadraticGaussNewtonCost, self).__init__()
 
     @property
     def state_size(self):
@@ -336,9 +334,9 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         return self._state_size
     
     @property
-    def error_state_size(self):
-        """Error-state size."""
-        return self._error_state_size
+    def pos_state_size(self):
+        """Position state size."""
+        return self._pos_state_size
 
     @property
     def vel_state_size(self):
@@ -365,64 +363,88 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         """State cost coefficient matrix in the quadratic terminal cost."""
         return self._P
     
-    def xi_ref(self, i) :
-        """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
-        return self._xi_ref[i]
+    def _err(self, x, i):
+        """Return the error with the reference
+        """
+        q, xi = x 
+
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        q_err = q.lminus( q_ref ).coeffs()
+        # q_err = q.rminus( q_ref ).coeffs()
+
+        vel_err = (xi - xi_ref).coeffs()
+
+        return q_err, vel_err
     
     def _l(self, x, u, i ):
-        """Instantaneous cost function.
+        """Stage cost function.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, tuple of pose and twist, [q, xi].
             u: Current control [action_size]. None if terminal.
             i: Current time step.
 
         Returns:
             Instantaneous cost (scalar).
         """
-        x = x.reshape(self.state_size, 1)
+        q, xi = x 
         u = u.reshape(self.action_size, 1)
 
-        Ct = jnp.block([
-            [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
-            [ -adjoint( self.xi_ref(i) ), jnp.identity( self.vel_state_size ) ],
-        ])
-        dt = jnp.vstack(
-            ( jnp.zeros((self.error_state_size,1)), self.xi_ref(i) )
-        )
-        yt = Ct @ x - dt
-        
-        return (yt.T @ self.Q @ yt + u.T @ self.R @ u).reshape(-1)[0]
-    
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        # Compute the logarithmic map of the pose error.
+        # q_err = q.rminus( q_ref ).coeffs()
+        q_err = q.lminus( q_ref ).coeffs()
+        q_err = q_err.reshape(self.pos_state_size,1)
+        q_cost = q_err.T @ self._Q[:self.pos_state_size, :self.pos_state_size] @ q_err
+
+        # Compute velocity error.
+        vel_err = (xi - xi_ref).coeffs()
+        vel_err = vel_err.reshape(self.vel_state_size,1)
+        v_cost = vel_err.T @ self._Q[self.vel_state_size:, self.vel_state_size:] @ vel_err
+
+        # Compute control cost.
+        u_cost = u.T @ self._R @ u
+
+        return (q_cost + v_cost + u_cost).reshape(-1)[0]
+
     def _l_terminal(self, x, i):
         """Terminal cost function.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, list of pose and twist, [q, xi]:
+                q:  SE3 matrix, 4x4
+                xi: twist velocity
             i: Current time step.
 
         Returns:
-            Terminal cost (scalar).
+            Instantaneous cost (scalar).
         """
-        x = x.reshape(self.state_size, 1)
-        
-        Ct = jnp.block([
-            [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
-            [ -adjoint( self.xi_ref(i) ), jnp.identity( self.vel_state_size ) ],
-        ])
-        dt = jnp.vstack(
-            ( jnp.zeros((self.error_state_size,1)), self.xi_ref(i) )
-        )
-        yt = Ct @ x - dt
-        
-        return (yt.T @ self.P @ yt).reshape(-1)[0]
+        q, xi = x 
+
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        # Compute the logarithmic map of the pose error.
+        # q_err = q.rminus( q_ref ).coeffs().reshape(self.pos_state_size,1)
+        q_err = q.lminus( q_ref ).coeffs().reshape(self.pos_state_size,1)
+        q_cost = q_err.T @ self._Q[:self.pos_state_size, :self.pos_state_size] @ q_err
+
+        # Compute velocity error.
+        vel_err = (xi - xi_ref).coeffs().reshape(self.vel_state_size,1)
+        v_cost = vel_err.T @ self._Q[self.vel_state_size:, self.vel_state_size:] @ vel_err
+
+        return (q_cost + v_cost).reshape(-1)[0]
 
     
     def l(self, x, u, i, terminal=False):
         """Instantaneous cost function.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, list of pose and twist, [q, xi].
             u: Current control [action_size]. None if terminal.
             i: Current time step.
             terminal: Compute terminal cost. Default: False.
@@ -439,7 +461,7 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         """Partial derivative of cost function with respect to x.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, list of pose and twist, [q, xi].
             u: Current control [action_size]. None if terminal.
             i: Current time step.
             terminal: Compute terminal cost. Default: False.
@@ -447,16 +469,28 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         Returns:
             dl/dx [state_size].
         """
-        if terminal:
-            return self._l_x_terminal(x,i).reshape(self.state_size,)
+        q, xi = x 
 
-        return self._l_x(x,u,i).reshape(self.state_size,)
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        J_e_x = np.empty((3,3))
+        # err = q.rminus(q_ref, J_e_x).reshape(6,1)
+        q_err = q.lminus(q_ref, J_e_x).coeffs().reshape(3,1)
+        J_q = (J_e_x.T * 2) @ self._Q[:self.pos_state_size, :self.pos_state_size] @ q_err
+
+        J_xi = 2 * self._Q[self.pos_state_size:, self.pos_state_size:] \
+            @ ( xi - xi_ref ).coeffs().reshape(3,1)
+        
+        return np.vstack(
+            (J_q, J_xi)
+        ).reshape((self.state_size,))
 
     def l_u(self, x, u, i, terminal=False):
         """Partial derivative of cost function with respect to u.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, list of pose and twist, [q, xi].
             u: Current control [action_size]. None if terminal.
             i: Current time step.
             terminal: Compute terminal cost. Default: False.
@@ -464,17 +498,14 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         Returns:
             dl/du [action_size].
         """
-        if terminal:
-            # Not a function of u, so the derivative is zero.
-            return np.zeros(self._action_size)
-
-        return self._l_u(x,u,i).reshape(self.action_size,)
+        return 2 * self._R @ u
 
     def l_xx(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to x.
+            Derived using Gauss-Newton.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, list of pose and twist, [q, xi].
             u: Current control [action_size]. None if terminal.
             i: Current time step.
             terminal: Compute terminal cost. Default: False.
@@ -482,16 +513,28 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         Returns:
             d^2l/dx^2 [state_size, state_size].
         """
-        if terminal:
-            return self._l_xx_terminal(x,i).reshape(self.state_size,self.state_size)
+        q, _ = x 
 
-        return self._l_xx(x,u,i).reshape(self.state_size,self.state_size)
+        q_ref = self._q_ref[i] 
+
+        J_e_x = np.empty((3,3))
+        # _ = q.rminus(q_ref, J_e_x)
+        _ = q.lminus(q_ref, J_e_x)
+
+        blk_size = self.pos_state_size
+        H_err = (J_e_x.T * 2) @ self._Q[:blk_size, :blk_size] @ J_e_x
+        H_xi = 2 * self._Q[blk_size:, blk_size:]
+        
+        return np.block([
+            [ H_err, np.zeros((blk_size,blk_size)) ],
+            [ np.zeros((blk_size,blk_size)), H_xi  ],
+        ])
 
     def l_ux(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to u and x.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, list of pose and twist, [q, xi].
             u: Current control [action_size]. None if terminal.
             i: Current time step.
             terminal: Compute terminal cost. Default: False.
@@ -499,17 +542,13 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         Returns:
             d^2l/dudx [action_size, state_size].
         """
-        if terminal:
-            # Not a function of u, so the derivative is zero.
-            return np.zeros((self._action_size, self._state_size))
-
-        return self._l_ux(x,u,i).reshape(self.action_size,self.state_size)
+        return np.zeros((self.action_size,self.state_size))
 
     def l_uu(self, x, u, i, terminal=False):
         """Second partial derivative of cost function with respect to u.
 
         Args:
-            x: Current state [state_size].
+            x: Current state, list of pose and twist, [q, xi].
             u: Current control [action_size]. None if terminal.
             i: Current time step.
             terminal: Compute terminal cost. Default: False.
@@ -517,14 +556,13 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         Returns:
             d^2l/du^2 [action_size, action_size].
         """
-        if terminal:
-            # Not a function of u, so the derivative is zero.
-            return np.zeros((self._action_size, self._action_size))
+        return 2 * self.R
 
-        return self._l_uu(x,u,i).reshape(self.action_size,self.action_size)
-    
+# =================================================================================
+# SE3 Cost
+# =================================================================================
 
-class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
+class SE3TrackingQuadraticGaussNewtonCost(BaseCost):
 
     """
         Stage Cost defined on Lie Algebra for SE(3) ErrorDynamics.
@@ -815,6 +853,9 @@ class ErrorStateSE3TrackingQuadraticGaussNewtonCost(BaseCost):
         """
         return 2 * self._R
 
+# =================================================================================
+# Lagrangian Cost
+# =================================================================================
 
 class ALConstrainedCost(BaseCost):
 
@@ -965,6 +1006,260 @@ class ALConstrainedCost(BaseCost):
             + gu.T @ self.Imu[i] @ gx
         return lux
 
+# =================================================================================
+# ErrorState Cost
+# =================================================================================
+
+class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
+
+    """
+        Instantaneous Stage Cost defined on Lie Algebra for SE(3) Error-state Dynamics.
+        - Implemented with Jax for autodiff.
+        - 2nd order quadratic cost, penalizing both position deviation and velocity deviation.
+        - Used for tracking the given reference trajectory
+        - Implemented for error-state \psi = Log(\bar{X}^{-1} X) 
+    """
+
+    def __init__(self, Q, R, P, xi_ref,
+                 state_size=(6,6), action_size=6, **kwargs):
+        """Constructs an AutoDiffCost.
+
+        Args:
+            Q: State weighting matrix for the stage cost. Shape: [state_size, state_size].
+                This matrix penalizes the state deviation (pos & vel) from the reference at each time step.
+            R: Control weighting matrix for the stage cost. Shape: [action_size, action_size].
+                This matrix penalizes the magnitude of control inputs at each time step.
+            P: State weighting matrix for the terminal cost. Shape: [state_size, state_size].
+                This matrix penalizes the state deviation (pos & vel) from the reference at the final time step.
+            xi_ref: List of velocity reference, described in Lie Algebra,
+                 (N, velocity_size, 1)
+            state_size: Tuple of State variable dimension, 
+                ( error state size, velocity state size ).
+            action_size: Input variable dimension.
+            **kwargs: Additional keyword-arguments to pass to
+                `theano.function()`.
+        """
+        self._state_size = state_size[0] + state_size[1]
+        self._error_state_size = state_size[0] 
+        self._vel_state_size = state_size[1] 
+        self._action_size = action_size
+
+        self._xi_ref = xi_ref
+        self._Q = jnp.array(Q)
+        self._R = jnp.array(R)
+        self._P = jnp.array(P)
+
+        self._l = jit(self._l)
+
+        self._l_x = jit(jacfwd(self._l))
+        self._l_u = jit(jacfwd(self._l, argnums=1))
+
+        self._l_xx = jit(hessian(self._l, argnums=0))
+        self._l_ux = jit(jacfwd( jacfwd(self._l, argnums=1) ))
+        self._l_uu = jit(hessian(self._l, argnums=1))
+
+        # Terminal cost only depends on x, so we only need to evaluate the x
+        # partial derivatives.
+
+        self._l_terminal = jit(self._l_terminal)
+        self._l_x_terminal = jit(jacfwd(self._l_terminal))
+        self._l_xx_terminal = jit(hessian(self._l_terminal))
+
+        super(ErrorStateSE3ApproxTrackingQuadraticAutodiffCost, self).__init__()
+
+    @property
+    def state_size(self):
+        """State size."""
+        return self._state_size
+    
+    @property
+    def error_state_size(self):
+        """Error-state size."""
+        return self._error_state_size
+
+    @property
+    def vel_state_size(self):
+        """Velocity state size."""
+        return self._vel_state_size
+
+    @property
+    def action_size(self):
+        """Action size."""
+        return self._action_size
+    
+    @property
+    def Q(self):
+        """State cost coefficient matrix in the quadratic stage cost."""
+        return self._Q
+    
+    @property
+    def R(self):
+        """Input cost coefficient matrix in the quadratic stage cost."""
+        return self._R
+    
+    @property
+    def P(self):
+        """State cost coefficient matrix in the quadratic terminal cost."""
+        return self._P
+    
+    def xi_ref(self, i) :
+        """Return the Lie Algebra velocity xi reference xi_ref at time index i."""
+        return self._xi_ref[i]
+    
+    def _l(self, x, u, i ):
+        """Instantaneous cost function.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+
+        Returns:
+            Instantaneous cost (scalar).
+        """
+        x = x.reshape(self.state_size, 1)
+        u = u.reshape(self.action_size, 1)
+
+        Ct = jnp.block([
+            [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
+            [ -adjoint( self.xi_ref(i) ), jnp.identity( self.vel_state_size ) ],
+        ])
+        dt = jnp.vstack(
+            ( jnp.zeros((self.error_state_size,1)), self.xi_ref(i) )
+        )
+        yt = Ct @ x - dt
+        
+        return (yt.T @ self.Q @ yt + u.T @ self.R @ u).reshape(-1)[0]
+    
+    def _l_terminal(self, x, i):
+        """Terminal cost function.
+
+        Args:
+            x: Current state [state_size].
+            i: Current time step.
+
+        Returns:
+            Terminal cost (scalar).
+        """
+        x = x.reshape(self.state_size, 1)
+        
+        Ct = jnp.block([
+            [ jnp.identity( self.error_state_size ), jnp.zeros((self.vel_state_size,self.vel_state_size)) ],
+            [ -adjoint( self.xi_ref(i) ), jnp.identity( self.vel_state_size ) ],
+        ])
+        dt = jnp.vstack(
+            ( jnp.zeros((self.error_state_size,1)), self.xi_ref(i) )
+        )
+        yt = Ct @ x - dt
+        
+        return (yt.T @ self.P @ yt).reshape(-1)[0]
+
+    
+    def l(self, x, u, i, terminal=False):
+        """Instantaneous cost function.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            Instantaneous cost (scalar).
+        """
+        if terminal:
+            return self._l_terminal(x,i)
+
+        return self._l(x,u,i)
+
+    def l_x(self, x, u, i, terminal=False):
+        """Partial derivative of cost function with respect to x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            dl/dx [state_size].
+        """
+        if terminal:
+            return self._l_x_terminal(x,i).reshape(self.state_size,)
+
+        return self._l_x(x,u,i).reshape(self.state_size,)
+
+    def l_u(self, x, u, i, terminal=False):
+        """Partial derivative of cost function with respect to u.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            dl/du [action_size].
+        """
+        if terminal:
+            # Not a function of u, so the derivative is zero.
+            return np.zeros(self._action_size)
+
+        return self._l_u(x,u,i).reshape(self.action_size,)
+
+    def l_xx(self, x, u, i, terminal=False):
+        """Second partial derivative of cost function with respect to x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            d^2l/dx^2 [state_size, state_size].
+        """
+        if terminal:
+            return self._l_xx_terminal(x,i).reshape(self.state_size,self.state_size)
+
+        return self._l_xx(x,u,i).reshape(self.state_size,self.state_size)
+
+    def l_ux(self, x, u, i, terminal=False):
+        """Second partial derivative of cost function with respect to u and x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            d^2l/dudx [action_size, state_size].
+        """
+        if terminal:
+            # Not a function of u, so the derivative is zero.
+            return np.zeros((self._action_size, self._state_size))
+
+        return self._l_ux(x,u,i).reshape(self.action_size,self.state_size)
+
+    def l_uu(self, x, u, i, terminal=False):
+        """Second partial derivative of cost function with respect to u.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            d^2l/du^2 [action_size, action_size].
+        """
+        if terminal:
+            # Not a function of u, so the derivative is zero.
+            return np.zeros((self._action_size, self._action_size))
+
+        return self._l_uu(x,u,i).reshape(self.action_size,self.action_size)
+    
 
 class ErrorStateSE3ApproxGenerationQuadraticAutodiffCost(BaseCost):
 
