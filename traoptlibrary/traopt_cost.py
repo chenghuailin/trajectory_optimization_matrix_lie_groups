@@ -1065,7 +1065,7 @@ class ErrorStateSE3ApproxTrackingQuadraticAutodiffCost(BaseCost):
         self._l_x_terminal = jit(jacfwd(self._l_terminal))
         self._l_xx_terminal = jit(hessian(self._l_terminal))
 
-        super(ErrorStateSE3ApproxTrackingQuadraticAutodiffCost, self).__init__()
+        super(SE3TrackingQuadraticGaussNewtonCost, self).__init__()
 
     @property
     def state_size(self):

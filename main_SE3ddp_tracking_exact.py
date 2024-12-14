@@ -3,7 +3,7 @@ from traoptlibrary.traopt_controller import iLQR_Tracking_SE3
 import numpy as np
 from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
-from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
+from traoptlibrary.traopt_cost import SE3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, parallel_SE32manifSE3,\
     rotm2euler, manifse32se3, rotmpos2SE3
 from scipy.linalg import expm
@@ -22,6 +22,12 @@ def on_iteration(iteration_count, xs, us, J_opt, accepted, converged,grad_wrt_in
 seed = 24234156
 key = random.key(seed)
 jax.config.update("jax_enable_x64", True)
+
+import sys
+import rerun as rr
+sys.path.append("visualization/rerun")
+from rerun_loader_urdf import URDFLogger
+from scipy.spatial.transform import Rotation
 
 dt = 0.01
 
@@ -110,7 +116,6 @@ path_to_reference_file = \
     # 'visualization/optimized_trajectories/path_dense_random_columns.npy'
     
     
-
 with open( path_to_reference_file, 'rb' ) as f:
     q_ref = np.load(f)
     xi_ref = np.load(f)
@@ -165,7 +170,7 @@ R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
 start_time = time.time() 
-cost = ErrorStateSE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref)
+cost = SE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref)
 end_time = time.time() 
 print("Cost Instantiation Finished")
 print(f"Cost instantiation took {end_time - start_time:.4f} seconds")
@@ -189,6 +194,24 @@ xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
 # Visualization Preparation
 # =====================================================
 
+# err_ilqr = [cost._err(x, i) for i, x in enumerate(xs_ilqr)]
+
+# q_ilqr_mnf = parallel_SE32manifSE3([x[0] for x in xs_ilqr])
+# qref_ilqr_mnf = parallel_SE32manifSE3(q_ref)
+
+# norm_q_err = np.array([np.linalg.norm(err_ilqr[i][0],ord=2) for i in range( len(err_ilqr) )])
+# norm_vel_err = np.array([np.linalg.norm(err_ilqr[i][1],ord=2) for i in range( len(err_ilqr) )])
+
+# q_euler_ilqr = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_ilqr ] )
+# q_xyz_ilqr = np.array([ x[0][:3,3] for x in xs_ilqr ] )
+# vel_euler_ilqr = np.array([ x[1][:3] for x in xs_ilqr ])
+# vel_xyz_ilqr = np.array([ x[1][3:] for x in xs_ilqr ])
+
+# # Extract positions from the reference and final trajectories
+# ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
+# final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory positions (Nsim+1, 3)
+
+
 err_ilqr = [cost._err(x, i) for i, x in enumerate(xs_ilqr)]
 
 q_ilqr_mnf = parallel_SE32manifSE3([x[0] for x in xs_ilqr])
@@ -198,6 +221,7 @@ norm_q_err = np.array([np.linalg.norm(err_ilqr[i][0],ord=2) for i in range( len(
 norm_vel_err = np.array([np.linalg.norm(err_ilqr[i][1],ord=2) for i in range( len(err_ilqr) )])
 
 q_euler_ilqr = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_ilqr ] )
+q_quat_ilqr = np.array([ Rotation.from_matrix(x[0][:3,:3]).as_quat() for x in xs_ilqr ] )
 q_xyz_ilqr = np.array([ x[0][:3,3] for x in xs_ilqr ] )
 vel_euler_ilqr = np.array([ x[1][:3] for x in xs_ilqr ])
 vel_xyz_ilqr = np.array([ x[1][3:] for x in xs_ilqr ])
@@ -205,6 +229,43 @@ vel_xyz_ilqr = np.array([ x[1][3:] for x in xs_ilqr ])
 # Extract positions from the reference and final trajectories
 ref_positions = q_ref[:, :3, 3]  # Reference trajectory positions (Nsim+1, 3)
 final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory positions (Nsim+1, 3)
+
+# =====================================================
+# Rerun Logging: Need to Open the server first
+# =====================================================
+
+rr.init("trajectory_animation",  spawn=True, recording_id="drone_racing")
+# rr.init("trajectory_animation", spawn=True)
+
+drone_urdf_path = "./visualization/rerun/drone.urdf"
+urdf_logger = URDFLogger(drone_urdf_path, None)
+
+urdf_logger.entity_path_prefix = f"solution/drone_urdf"
+urdf_logger.log()
+
+for step in range(N):
+
+    rr.set_time_seconds( "sim_time", dt * step )
+
+    rr.log(
+        f"solution/position",
+        rr.Points3D(
+            final_positions[step] #,
+            # colors=vel_mapped_color,
+        ),
+    )
+
+    rr.log(
+        f"solution/drone_urdf",
+        rr.Transform3D(
+            translation=final_positions[step],
+            rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
+            axis_length=1.0,
+        ),
+    )
+
+print("Rerun logging finished")
+
 
 # =====================================================
 # Visualization by State

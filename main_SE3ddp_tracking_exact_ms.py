@@ -3,7 +3,7 @@ from traoptlibrary.traopt_controller import iLQR_Tracking_SE3_MS
 import numpy as np
 from jax import random
 from traoptlibrary.traopt_dynamics import SE3Dynamics
-from traoptlibrary.traopt_cost import ErrorStateSE3TrackingQuadraticGaussNewtonCost
+from traoptlibrary.traopt_cost import SE3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_utilis import se3_hat, quatpos2SE3, \
     parallel_SE32manifSE3, rotm2euler, manifse32se3
 from scipy.linalg import expm
@@ -158,7 +158,7 @@ R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
 start_time = time.time() 
-cost = ErrorStateSE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref)
+cost = SE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref)
 end_time = time.time() 
 print("Cost Instantiation Finished")
 print(f"Cost instantiation took {end_time - start_time:.4f} seconds")

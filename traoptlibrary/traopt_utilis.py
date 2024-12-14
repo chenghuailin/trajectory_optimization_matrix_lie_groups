@@ -5,7 +5,7 @@ from jax import vmap, jit
 import numpy as jnp
 from jax.numpy.linalg import norm
 # from pyquaternion import Quaternion
-from manifpy import SE3, SE3Tangent
+from manifpy import SE3, SE3Tangent, SO3, SO3Tangent
 from concurrent.futures import ThreadPoolExecutor
 from scipy.spatial.transform import Rotation
 from functools import partial
@@ -284,6 +284,14 @@ def rotmpos2SE3(m, x):
     else:
         raise ValueError("Input dimension incorrect")
     
+def SO32manifSO3( x ):
+    """ Converts a SO(3) matrix to a manif SO(3) object
+
+        Args: 
+            x: SO3 matrix, numpy array, (3, 3) .
+    """
+    return SO3(Rotation.from_matrix(x).as_quat())
+
 def SE32quatpos(m):
     """ Converts a SE(3) matrix to vector concatenated by quaternion 
         and position. 

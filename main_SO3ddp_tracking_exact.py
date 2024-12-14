@@ -170,7 +170,7 @@ rr.init("pendulum_animation", spawn=True, recording_id="3d_inverted_pendulum")
 
 pendulum_urdf_path = "./visualization/rerun/3d_inverted_pendulum.urdf"
 urdf_logger = URDFLogger(pendulum_urdf_path, None)
-urdf_logger.entity_path_prefix = f"solution/pendulum_urdf"
+urdf_logger.entity_path_prefix = f"solution_ss/pendulum_urdf"
 urdf_logger.log()
 
 for step in range(N):
@@ -178,7 +178,7 @@ for step in range(N):
     rr.set_time_seconds( "sim_time", dt * step )
 
     rr.log(
-        f"solution/position",
+        f"solution_ss/position",
         rr.Points3D(
             rod_pos_sol[step] #,
             # colors=vel_mapped_color,
@@ -186,7 +186,7 @@ for step in range(N):
     )
 
     rr.log(
-        f"solution/pendulum_urdf",
+        f"solution_ss/pendulum_urdf",
         rr.Transform3D(
             translation=np.array([0.,0.,0.]),
             rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
