@@ -141,6 +141,7 @@ us_init = np.zeros((N, action_size,))
 ilqr = iLQR_Tracking_SO3_MS(dynamics, cost, N, 
                             q_ref, xi_ref,
                             hessians=HESSIANS,
+                            line_search=True,
                             rollout='nonlinear')
 
 xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \

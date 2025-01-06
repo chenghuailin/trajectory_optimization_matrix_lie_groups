@@ -1262,7 +1262,7 @@ class iLQR_Tracking_SO3_MS(BaseController):
 
                     accepted = True
 
-                    if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                    if np.abs((J_opt - J_new) / (J_opt) ) < tol_J:
                         converged = True
 
                 end_time = time.perf_counter()
@@ -1379,7 +1379,8 @@ class iLQR_Tracking_SO3_MS(BaseController):
 
                 q_next_new = q_next + \
                     ( SO3Tangent(F_x[i,:3,:] @ xs_err + F_u[i,:3,:] @ us_err ) + alpha * defect_q_mnf )
-                xi_next_new = xi_next + F_x[i,3:,:] @ xs_err + F_u[i,3:,:] @ us_err + alpha * defect_xi
+                xi_next_new = xi_next + \
+                    ( SO3Tangent(F_x[i,3:,:] @ xs_err + F_u[i,3:,:] @ us_err) + alpha * defect_xi )
                 xs_new[i + 1] = [q_next_new, xi_next_new].copy()
 
         # Compute Terminal Error
@@ -1620,7 +1621,6 @@ class iLQR_Tracking_SO3_MS(BaseController):
                     # Increase regularization term.
                     self._delta = max(1.0, self._delta) * self._delta_0
                     self._mu = max(self._mu_min, self._mu * self._delta)
-
 
                     if self._mu_max and self._mu >= self._mu_max:
                         warnings.warn("exceeded max regularization term")
