@@ -11,7 +11,7 @@ from manifpy import SE3, SE3Tangent
 
 # 定义参考位置和姿态
 p0 = np.array([1.0, 1.0, -1.0])
-quat_ref = Rotation.from_euler('zyx', [60.0, 60.0, 0.0], degrees=True).as_quat()
+quat_ref = Rotation.from_euler('zyx', [30.0, 10.0, 0.0], degrees=True).as_quat()
 q_ref_mnf = SE3(position=p0, quaternion=quat_ref)
 
 # 定义 th_z 和 th_y 的角度范围
@@ -74,10 +74,10 @@ surf = ax.plot_surface(
 )
 
 # 设置坐标轴标签和标题
-ax.set_xlabel('th_z (degrees)', fontsize=12)
-ax.set_ylabel('th_y (degrees)', fontsize=12)
-ax.set_zlabel('Left Error Norm', fontsize=12)
-ax.set_title('Left Error Norm as a Function of th_z and th_y', fontsize=14)
+ax.set_xlabel(r'Z-axis angle $\theta_z$ ($^\circ$)')
+ax.set_ylabel(r'Y-axis angle $\theta_y$ ($^\circ$)')
+ax.set_zlabel('Left Error Norm')
+ax.set_title(r'Left Error Norm $||\text{Log}(R(\theta_z,\theta_y)R_{ref}^{-1})||_2$, $\theta_x = 0^{\circ}$')
 
 # 添加颜色条，关联到 surf 对象
 fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label='Left Error Norm')
