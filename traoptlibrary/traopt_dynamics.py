@@ -273,7 +273,7 @@ class AutoDiffDynamics(BaseDynamics):
 
 class SO3Dynamics(BaseDynamics):
 
-    """Error-State SE(3) Dynamics Model"""
+    """Error-State SO(3) Dynamics Model"""
 
     def __init__(self, J, dt, integration_method="euler",
                     state_size=(3,3), action_size=3, 
@@ -282,8 +282,7 @@ class SO3Dynamics(BaseDynamics):
         """Constructs an Dynamics model for SO(3).
 
         Args:
-            J: diag Inertia matrix, I_b, 
-                I_b : moment of inertia in the body frame.
+            J: diag Inertia matrix, moment of inertia in the body frame.
             dt: Sampling time.
             integration_method: integration method for dynamics,
                 "euler": euler method,
@@ -416,6 +415,215 @@ class SO3Dynamics(BaseDynamics):
         if not self._has_hessians:
             raise NotImplementedError
         return self._f_uu(x,u,i)    
+
+
+class Pendulum3dDyanmics(BaseDynamics):
+
+    """A dynamics model for 3d pendulum actuated by the pivot point"""
+
+    def __init__(self, J, m, length, dt,  integration_method="euler",
+                    state_size=(3,3), action_size=3, 
+                    hessians=False, debug = None, 
+                    **kwargs):
+        """Constructs an Dynamics model for Pendulum3D based on SO3.
+
+        Args:
+            J: diag Inertia matrix, I_b, 
+            m: mass of the system,
+            length: length of the pendulum system
+            dt: Sampling time.
+            integration_method: integration method for dynamics,
+                "euler": euler method,
+                "rk4": Runga Kutta 4 method.
+            state_size: Tuple of State variable dimension, 
+                ( error state size, velocity state size ).
+            action_size: Input variable dimension.
+            hessians: Evaluate the dynamic model's second order derivatives.
+                Default: only use first order derivatives. (i.e. iLQR instead
+                of DDP).
+            **kwargs: Additional keyword-arguments to pass to any potential 
+                function, e.g. in the preivious version `theano.function()`.
+        """
+
+        self._state_size = state_size[0] + state_size[1]
+        self._pos_state_size = state_size[0] 
+        self._vel_state_size = state_size[1] 
+        self._error_state_size = state_size[0]
+        self._action_size = action_size
+
+        self._J = J
+        self._Jinv = np.linalg.inv(J)
+        self._m = m
+        self._l = length
+        self._dt = dt
+        self._g = 9.8
+
+        self._integration_method = integration_method
+        if integration_method == "euler":
+            self._f = self.fd_euler
+        elif integration_method == "rk4":
+            # self._f = jit(self.fd_rk4)
+            raise ValueError("RK4 not implemented yet.")
+        else:
+            raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
+        
+        self._has_hessians = hessians
+        self._debug = debug
+        
+        super(Pendulum3dDyanmics, self).__init__()
+
+    @property
+    def state_size(self):
+        """State size."""
+        return self._state_size
+
+    @property
+    def pos_state_size(self):
+        """Error-state size."""
+        return self._pos_state_size
+
+    @property
+    def vel_state_size(self):
+        """Velocity state size."""
+        return self._vel_state_size
+
+    @property
+    def action_size(self):
+        """Action size."""
+        return self._action_size
+
+    @property
+    def has_hessians(self):
+        """Whether the second order derivatives are available."""
+        return self._has_hessians
+
+    @property
+    def J(self):
+        """Inertia matrix of the system."""
+        return self._J
+    
+    @property
+    def Jinv(self):
+        """Inverse of the inertia matrix."""
+        return self._Jinv
+    
+    @property
+    def dt(self):
+        """Sampling time of the system dynamics."""
+        return self._dt
+    
+    @property
+    def m(self):
+        """Mass of the system."""
+        return self._m
+    
+    @property
+    def l(self):
+        """length of the pendulum stick."""
+        return self._l
+    
+    @property
+    def g(self):
+        """Gravitivity acceleration"""
+        return self._g
+        
+    def fd_euler( self, x, u, i ):
+
+        q, xi = x 
+        u = u.reshape(self.action_size, 1)
+
+        down_vec = np.array([0,0,-1.])
+        rho = self.l / 2 * down_vec
+
+        g_term = SO3Tangent(self.m * self.g * rho).smallAdj() @ q.inverse().act(down_vec)
+        g_term = g_term.reshape(self.vel_state_size, 1)
+
+        M = SO3Tangent(self.m * rho).smallAdj() @ q.inverse().act(u)
+        M = M.reshape(self.vel_state_size, 1)
+
+        vec_xi = xi.coeffs().reshape(self.vel_state_size, 1)
+
+        q_next = q.rplus( xi * self.dt )
+        xi_next = SO3Tangent(
+            vec_xi 
+            + self.Jinv @ ( xi.smallAdj().T @ self.J @ vec_xi + g_term + M ) * self.dt  
+            # + self.Jinv @ ( xi.smallAdj().T @ self.J @ vec_xi + g_term ) * self.dt  
+            # + self.Jinv @ ( xi.smallAdj().T @ self.J @ vec_xi + g_term + u ) * self.dt  
+        )
+        return [q_next, xi_next]
+    
+    def f(self, x, u, i):
+        return self._f(x,u,i)
+    
+    def f_x(self, x, u, i):
+
+        q, xi = x 
+
+        down_vec = np.array([0,0,-1.])
+        rho = self.l / 2 * down_vec
+       
+        J_q_q = np.empty((self.pos_state_size,self.pos_state_size))
+        J_q_xih = np.empty((self.vel_state_size, self.vel_state_size))
+        _ = q.rplus(xi * self.dt, J_q_q, J_q_xih)
+        J_q_xi = J_q_xih * self.dt
+
+        G = skew( self.J @ xi.coeffs() )
+        H = self.Jinv @ ( xi.smallAdj().T @ self.J + G )
+        
+        J_qTe3_qT = np.empty((self.vel_state_size, self.pos_state_size))
+        J_q_inv = np.empty((self.pos_state_size, self.pos_state_size))
+        _ = q.inverse( J_q_inv ).act( down_vec, J_qTe3_qT )
+        L1 = skew( self.m * self.g * rho ) @ J_qTe3_qT @ J_q_inv
+
+        J_qTu_qT = np.empty((self.vel_state_size, self.pos_state_size))
+        J_q_inv = np.empty((self.pos_state_size, self.pos_state_size))
+        _ = q.inverse( J_q_inv ).act( u, J_qTu_qT )
+        L2 = skew( self.m * rho ) @ J_qTu_qT @ J_q_inv
+
+        L = self.Jinv @ ( L1 + L2 ) 
+        # L = self.Jinv @ L1 
+
+        return np.block([
+                    [J_q_q,         J_q_xi],
+                    [L*self.dt,     np.identity(3) + H*self.dt],
+                ])
+
+    def f_u(self, x, u, i):
+
+        q, xi = x 
+
+        down_vec = np.array([0,0,-1.])
+        rho = self.l / 2 * down_vec
+
+        J_RTu_u = np.empty((self.vel_state_size, self.pos_state_size))
+        _ =  q.inverse().act(down_vec, None, J_RTu_u)
+
+        # bt = self.Jinv @ SO3Tangent( self.m * rho ).smallAdj() @ q.inverse().rotation()
+        bt = self.Jinv @ SO3Tangent( self.m * rho ).smallAdj() @ J_RTu_u
+        
+        # bt = self.Jinv
+
+        Bt = np.vstack(
+            (np.zeros((self._pos_state_size, self.action_size)), bt )
+        )
+
+        return Bt * self.dt
+
+    def f_xx(self, x, u, i):
+        if not self._has_hessians:
+            raise NotImplementedError
+        return self._f_xx(x,u,i)
+
+    def f_ux(self, x, u, i):
+        if not self._has_hessians:
+            raise NotImplementedError
+        return self._f_ux(x,u,i)
+
+    def f_uu(self, x, u, i):
+        if not self._has_hessians:
+            raise NotImplementedError
+        return self._f_uu(x,u,i)    
+
 
 class SE3Dynamics(BaseDynamics):
 
@@ -688,7 +896,292 @@ class SE3Dynamics(BaseDynamics):
 
         return self._f_uu(x,u,i)
     
+
+class RigidBodyDynamics(BaseDynamics):
+
+    """SE(3) Dynamics with Gravity"""
+
+    def __init__(self, J, dt, integration_method="euler",
+                    state_size=(6,6), action_size=6, 
+                    hessians=False, debug = None, 
+                    **kwargs):
+        """Constructs an Dynamics model for SE(3).
+
+        Args:
+            J: Inertia matrix, diag(I_b, m * I_3), 
+                m : body mass,
+                I_b : moment of inertia in the body frame.
+            dt: Sampling time.
+            integration_method: integration method for dynamics,
+                "euler": euler method,
+                "rk4": Runga Kutta 4 method.
+            state_size: Tuple of State variable dimension, 
+                ( error state size, velocity state size ).
+            action_size: Input variable dimension.
+            hessians: Evaluate the dynamic model's second order derivatives.
+                Default: only use first order derivatives. (i.e. iLQR instead
+                of DDP).
+            **kwargs: Additional keyword-arguments to pass to any potential 
+                function, e.g. in the preivious version `theano.function()`.
+        """
+
+        self._state_size = state_size[0] + state_size[1]
+        self._error_state_size = state_size[0] 
+        self._vel_state_size = state_size[1] 
+        self._action_size = action_size
+
+        self._Ib = J[0:3, 0:3] 
+        self._m = J[4,4]
+        self._g = 9.8
+        self._J = J
+        self._Jinv = np.linalg.inv(J)
+        self._dt = dt
+
+        self._Bt = np.vstack(
+            (np.zeros((self.error_state_size, self.action_size)),self.Jinv )
+        )
+
+        self._integration_method = integration_method
+        if integration_method == "euler":
+            # self._f = jit(self.fd_euler)
+            self._f = self.fd_euler
+        elif integration_method == "rk4":
+            # self._f = jit(self.fd_rk4)
+            raise ValueError("RK4 not implemented yet.")
+        else:
+            raise ValueError("Invalid integration method. Choose 'euler' or 'rk4'.")
+        
+        self._has_hessians = hessians
+        # if hessians:
+        #     self._f_xx = jit(hessian(self._f, argnums=0))
+        #     self._f_ux = jit(jacfwd( jacfwd(self._f, argnums=1) ))
+        #     self._f_uu = jit(hessian(self._f, argnums=1))
+
+        self._debug = debug
+        
+        super(SE3Dynamics, self).__init__()
+
+    @property
+    def state_size(self):
+        """State size."""
+        return self._state_size
+
+    @property
+    def error_state_size(self):
+        """Error-state size."""
+        return self._error_state_size
+
+    @property
+    def vel_state_size(self):
+        """Velocity state size."""
+        return self._vel_state_size
+
+    @property
+    def action_size(self):
+        """Action size."""
+        return self._action_size
+
+    @property
+    def has_hessians(self):
+        """Whether the second order derivatives are available."""
+        return self._has_hessians
+
+    @property
+    def Ib(self):
+        """Moment of inertia in the body frame."""
+        return self._Ib
+
+    @property
+    def m(self):
+        """Mass of the system."""
+        return self._m
+
+    @property
+    def J(self):
+        """Inertia matrix of the system."""
+        return self._J
     
+    @property
+    def Jinv(self):
+        """Inverse of the inertia matrix."""
+        return self._Jinv
+    
+    @property
+    def dt(self):
+        """Sampling time of the system dynamics."""
+        return self._dt
+    
+    @property
+    def g(self):
+        "Gravitivity acceleration"
+        return self._g
+    
+    def fc(self, x, u, i):
+        """ Continuous nonlinear dynamicsf.
+
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+
+        q, xi = x 
+
+        # TODO: decide if rewriting into manif or reordering xi is needed
+        q_dot = q @ scipy.linalg.expm( se3_hat(xi))
+        xi_dot =  self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + u )
+        
+        return [q_dot, xi_dot]
+    
+    def fd_euler( self, x, u, i ):
+        """ Descrtized dynamics with Eular method.
+
+        Args:
+            x: Current state [state_size], stacked by
+                error-state and velocity, both on Lie Algebra
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+
+        q, xi = x 
+        q_mnf = SE32manifSE3(q)
+        xi_mnf = se32manifse3(xi)
+
+        xi = xi.reshape(self.vel_state_size, 1)
+        u = u.reshape(self.action_size, 1)
+
+        down_vec = np.array([0,0,-1.])
+        g_acc = self.m * self.g * q.inverse().rotation() @ down_vec
+        g_acc = np.concatenate( (np.zeros((3,1)), g_acc ) )
+
+        q_next = manifSE32SE3( q_mnf.rplus(xi_mnf * self.dt) ) 
+        # q_next = q @ scipy.linalg.expm( se3_hat(xi) * self.dt )
+        xi_next = xi + self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + g_acc + u ) * self.dt  
+
+        return [q_next, xi_next.reshape(self.vel_state_size,)]
+    
+    def f(self, x, u, i):
+        """Dynamics model.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            Next state [state_size].
+        """
+        return self._f(x,u,i)
+    
+    def f_x(self, x, u, i):
+        """Partial derivative of dynamics model with respect to x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            df/dx [state_size, state_size].
+        """
+
+        q, xi = x 
+        omega = xi[:3]
+        v = xi[3:]
+
+        q = SE32manifSE3( q )
+        xi = se32manifse3( xi )
+        
+        J_q_q = np.empty((6,6))
+        J_q_xih = np.empty((6,6))
+        _ = q.rplus(xi * self.dt, J_q_q, J_q_xih)
+
+        J_q_q = Jmnf2J(J_q_q)
+        J_q_xi = Jmnf2J(J_q_xih) * self.dt
+
+        G = np.block([
+            [skew( self.Ib @ omega ), self.m * skew( v )],
+            [self.m * skew( v ), np.zeros((3,3))],        
+        ])
+        H = self.Jinv @ ( coadjoint( xi.coeffs() ) @ self.J + G )
+
+        L = self.Jinv @ ( coadjoint( xi.coeffs() ) @ self.J + G )
+
+        return np.block([
+                    [J_q_q,             J_q_xi],
+                    [np.zeros((6,6)),   np.identity(6) + H*self.dt],
+                ])
+
+    def f_u(self, x, u, i):
+        """Partial derivative of dynamics model with respect to u.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            df/du [state_size, action_size].
+        """
+        return self._Bt * self.dt
+
+    def f_xx(self, x, u, i):
+        """Second partial derivative of dynamics model with respect to x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            d^2f/dx^2 [state_size, state_size, state_size].
+        """
+        if not self._has_hessians:
+            raise NotImplementedError
+
+        return self._f_xx(x,u,i)
+
+    def f_ux(self, x, u, i):
+        """Second partial derivative of dynamics model with respect to u and x.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            d^2f/dudx [state_size, action_size, state_size].
+        """
+        if not self._has_hessians:
+            raise NotImplementedError
+
+        return self._f_ux(x,u,i)
+
+    def f_uu(self, x, u, i):
+        """Second partial derivative of dynamics model with respect to u.
+
+        Args:
+            x: Current state [state_size].
+            u: Current control [action_size].
+            i: Current time step.
+
+        Returns:
+            d^2f/du^2 [state_size, action_size, action_size].
+        """
+        if not self._has_hessians:
+            raise NotImplementedError
+
+        return self._f_uu(x,u,i)
+    
+
+
 class ErrorStateSE3ApproxLinearRolloutDynamics(BaseDynamics):
 
     """Error-State SE(3) Dynamics Model implemented with Jax"""
