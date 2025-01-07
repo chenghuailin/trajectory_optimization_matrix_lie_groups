@@ -1086,7 +1086,8 @@ class iLQR_Tracking_SO3_MS(BaseController):
         self._defect_mu0 = 10.
         self._defect_rho = 0.5
         self._defect_gamma = 0.05
-        self._defect_min = 10.
+        self._defect_mu_min = 10.
+        self._defect_kappa = 1e-14
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
@@ -1173,6 +1174,9 @@ class iLQR_Tracking_SO3_MS(BaseController):
         xs_hist.append(xs.copy())
         us_hist.append(us.copy())
 
+        if self._line_search:
+            d_weight_prev = self._defect_mu0
+
         for iteration in range(n_iterations):
             accepted = False
             
@@ -1222,8 +1226,10 @@ class iLQR_Tracking_SO3_MS(BaseController):
                     exact_lqr_cost_change = self._expected_cost_change( 
                         xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
                     )
-                    d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm )
+                    d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm, d_weight_prev )
+                    d_weight_prev = d_weight
                     merit = J_opt + d_weight * d_norm
+                    print("Iteration:", iteration, "Nominal, Cost:", J_opt, "Merit:", merit, "d_weight:", d_weight )
 
                     # Backtracking line search.
                     for alpha in alphas:
@@ -1234,11 +1240,12 @@ class iLQR_Tracking_SO3_MS(BaseController):
                         d_norm_new = self._compute_defect_norm( d_new )
                         J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
 
+                        merit_new = J_new + d_weight * d_norm_new
+
                         end_time = time.perf_counter()
                         time_calc = end_time - start_time   
-                        print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
-
-                        merit_new = J_new + d_weight * d_norm_new
+                        print("Iteration:", iteration, "One Rollout Finished, Used Time:", time_calc, 
+                              "\n         Alpha:", alpha, "Cost:", J_new, "Merit:", merit_new )
 
                         if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
                             if np.abs((J_opt - J_new) / J_opt) < tol_J and d_norm <  tol_d_norm:
@@ -1250,7 +1257,10 @@ class iLQR_Tracking_SO3_MS(BaseController):
 
                             # Accept this.
                             accepted = True
+                            print("Line Search Finished")
                             break
+
+                    print("Line Search Finished, Step Size Exhausted")
                 
                 else:
                     alpha = 1
@@ -1267,7 +1277,7 @@ class iLQR_Tracking_SO3_MS(BaseController):
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
+                print("Iteration:", iteration, "Forward Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
 
                 if accepted:    
                     J_opt = J_new
@@ -1277,9 +1287,9 @@ class iLQR_Tracking_SO3_MS(BaseController):
                 # # Accept this.
                 # accepted = True
 
-            end_time = time.perf_counter()
-            time_calc = end_time - start_time   
-            print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
+            # end_time = time.perf_counter()
+            # time_calc = end_time - start_time   
+            # print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
            
             if on_iteration:
                 on_iteration(iteration, xs, us, J_opt,
@@ -1291,7 +1301,7 @@ class iLQR_Tracking_SO3_MS(BaseController):
             if converged:
                 break
 
-            if not accepted:
+            if (not accepted) and self._line_search:
                 warnings.warn("Couldn't find descent direction, regularization and line search step exhausted")
                 break
 
@@ -1427,11 +1437,20 @@ class iLQR_Tracking_SO3_MS(BaseController):
     def _scale_cost_change( self, ecc, alpha ):
         return alpha * ecc[0] + 0.5 * (alpha**2) * ecc[1] 
 
-    def _update_defect_weight( self, expected_cost_change, d_norm ):
+    def _update_defect_weight( self, expected_cost_change, d_norm, defect_weight_prev ):
         """Computes the expected cost change
         """                   
+        if d_norm < self._defect_kappa:
+            defect_weight = defect_weight_prev
+            return defect_weight
+
         defect_weight = self._defect_mu0 \
             + np.abs(expected_cost_change[0]+0.5*expected_cost_change[1]) / ( (1 - self._defect_rho) * d_norm )
+        
+        # Didn't ensure monotonic increasing compared to Li's works
+
+        defect_weight = max( self._defect_mu_min, defect_weight )
+
         return defect_weight
 
     def _compute_defect(self, xs, us):
@@ -2332,7 +2351,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
         self._defect_mu0 = 10.
         self._defect_rho = 0.5
         self._defect_gamma = 0.05
-        self._defect_min = 10.
+        self._defect_mu_min = self._defect_mu0
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
@@ -2411,6 +2430,9 @@ class iLQR_Tracking_SE3_MS(BaseController):
         xs_hist.append(xs.copy())
         us_hist.append(us.copy())
 
+        if self._line_search:
+            d_weight_prev = self._defect_mu0
+
         for iteration in range(n_iterations):
             accepted = False
             
@@ -2460,8 +2482,10 @@ class iLQR_Tracking_SE3_MS(BaseController):
                     exact_lqr_cost_change = self._expected_cost_change( 
                         xs_errs, us_errs, L_x, L_u, L_xx, L_ux, L_uu, alpha=1.0 
                     )
-                    d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm )
+                    d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm, d_weight_prev )
+                    d_weight_prev = d_weight
                     merit = J_opt + d_weight * d_norm
+                    print("Iteration:", iteration, "Nominal, Cost:", J_opt, "Merit:", merit, "d_weight:", d_weight )
 
                     # Backtracking line search.
                     for alpha in alphas:
@@ -2472,11 +2496,12 @@ class iLQR_Tracking_SE3_MS(BaseController):
                         d_norm_new = self._compute_defect_norm( d_new )
                         J_expected_change = self._scale_cost_change( exact_lqr_cost_change, alpha )
 
+                        merit_new = J_new + d_weight * d_norm_new
+
                         end_time = time.perf_counter()
                         time_calc = end_time - start_time   
-                        print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
-
-                        merit_new = J_new + d_weight * d_norm_new
+                        print("Iteration:", iteration, "One Rollout Finished, Used Time:", time_calc, 
+                              "\n          Alpha:", alpha, "Cost:", J_new, "Merit:", merit_new,  )
 
                         if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
                             if np.abs((J_opt - J_new) / J_opt) < tol_J and d_norm <  tol_d_norm:
@@ -2488,7 +2513,10 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
                             # Accept this.
                             accepted = True
+                            print("Line Search Finished")
                             break
+
+                    print("Line Search Finished, Step Size Exhausted")
                 
                 else:
                     alpha = 1
@@ -2505,7 +2533,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
-                print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
+                print("Iteration:", iteration, "Forward Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
 
                 if accepted:    
                     J_opt = J_new
@@ -2515,9 +2543,9 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 # # Accept this.
                 # accepted = True
 
-            end_time = time.perf_counter()
-            time_calc = end_time - start_time   
-            print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
+            # end_time = time.perf_counter()
+            # time_calc = end_time - start_time   
+            # print("Iteration:", iteration, "Rollout and Line Search Finished, Used Time:", time_calc )
            
             if on_iteration:
                 on_iteration(iteration, xs, us, J_opt,
@@ -2672,11 +2700,18 @@ class iLQR_Tracking_SE3_MS(BaseController):
     def _scale_cost_change( self, ecc, alpha ):
         return alpha * ecc[0] + 0.5 * (alpha**2) * ecc[1] 
 
-    def _update_defect_weight( self, expected_cost_change, d_norm ):
+    def _update_defect_weight( self, expected_cost_change, d_norm, defect_weight_prev ):
         """Computes the expected cost change
         """                   
+        if d_norm < self._defect_kappa:
+            defect_weight = defect_weight_prev
+            return defect_weight
+
         defect_weight = self._defect_mu0 \
             + np.abs(expected_cost_change[0]+0.5*expected_cost_change[1]) / ( (1 - self._defect_rho) * d_norm )
+        
+        defect_weight = max( self._defect_mu_min, defect_weight )
+
         return defect_weight
 
     def _compute_defect(self, xs, us):
