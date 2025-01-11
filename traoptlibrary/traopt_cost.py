@@ -853,6 +853,298 @@ class SE3TrackingQuadraticGaussNewtonCost(BaseCost):
         """
         return 2 * self._R
 
+
+class DroneTrackingQuadraticGaussNewtonCost(BaseCost):
+
+    """
+        Stage Cost defined on Lie Algebra for Drone Racing Tracking based on SE(3) Dynamics.
+        - 2nd order quadratic cost, penalizing both position deviation and velocity deviation.
+        - Used for tracking the given reference trajectory
+        - Used for exact dynamics, i.e. state is \Psi
+        - Stage cost 
+                l( (X_k, xi_k), u_k, k ) = ||Log(Xbar_k^{-1} X_k)||^2_Q1 
+                                            + ||xi_k - xibar_k||^2_Q2
+                                            + ||u||^2_R
+        - Terminal cost
+                l( (X_k, xi_k), u_k, k ) = ||Log(Xbar_N^{-1} X_N)||^2_P1 
+                                            + ||xi_N - xibar_N||^2_P2
+    """
+
+    def __init__(self, Q, R, P, q_ref, xi_ref,
+                 state_size=(6,6), action_size=4, **kwargs):
+        """Constructor.
+
+        Args:
+            Q: State weighting matrix for the stage cost. Shape: [state_size, state_size].
+                This matrix penalizes the state deviation (pos & vel) from the reference at each time step.
+            R: Control weighting matrix for the stage cost. Shape: [action_size, action_size].
+                This matrix penalizes the magnitude of control inputs at each time step.
+            P: State weighting matrix for the terminal cost. Shape: [state_size, state_size].
+                This matrix penalizes the state deviation (pos & vel) from the reference at the final time step.
+            q_ref: configuration reference, list of SE(3) matrix,
+                 (N, 4, 4)
+            xi_ref: velocity reference along the trajectory, described in Lie Algebra,
+                 (N, velocity_size,)
+            state_size: Tuple of State variable dimension, 
+                ( error state size, velocity state size ).
+            action_size: Input variable dimension.
+            **kwargs: Additional keyword-arguments for backup usage.
+        """
+        self._state_size = state_size[0] + state_size[1]
+        self._error_state_size = state_size[0] 
+        self._vel_state_size = state_size[1] 
+        self._action_size = action_size
+
+        # print("Cost: Start Reference Manifization")
+        # self._q_ref = [ SE32manifSE3(q) for q in q_ref ]
+        self._q_ref = parallel_SE32manifSE3(q_ref)
+        # print("Cost: End Manifization")
+        self._xi_ref = xi_ref
+
+        self._Q = Q
+        self._R = R
+        self._P = P
+
+        super(SE3TrackingQuadraticGaussNewtonCost, self).__init__()
+
+    @property
+    def state_size(self):
+        """State size."""
+        return self._state_size
+    
+    @property
+    def error_state_size(self):
+        """Error-state size."""
+        return self._error_state_size
+
+    @property
+    def vel_state_size(self):
+        """Velocity state size."""
+        return self._vel_state_size
+
+    @property
+    def action_size(self):
+        """Action size."""
+        return self._action_size
+    
+    @property
+    def Q(self):
+        """State cost coefficient matrix in the quadratic stage cost."""
+        return self._Q
+    
+    @property
+    def R(self):
+        """Input cost coefficient matrix in the quadratic stage cost."""
+        return self._R
+    
+    @property
+    def P(self):
+        """State cost coefficient matrix in the quadratic terminal cost."""
+        return self._P
+    
+    def _err(self, x, i):
+        """Return the error with the reference
+        """
+        q, xi = x 
+        q = SE32manifSE3( q )
+
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        q_err = manifse32se3( q.lminus( q_ref ).coeffs() )
+        # q_err = manifse32se3( q.rminus( q_ref ).coeffs() )
+
+        vel_err = xi - xi_ref
+
+        return q_err, vel_err
+    
+    def _l(self, x, u, i ):
+        """Stage cost function.
+
+        Args:
+            x: Current state, tuple of pose and twist, [q, xi].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+
+        Returns:
+            Instantaneous cost (scalar).
+        """
+        q, xi = x 
+        q = SE32manifSE3( q )
+        u = u.reshape(self.action_size, 1)
+
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        # Compute the logarithmic map of the pose error.
+        # q_err = q.rminus( q_ref ).coeffs()
+        q_err = q.lminus( q_ref ).coeffs()
+        q_err = manifse32se3( q_err ).reshape(6,1)
+        q_cost = q_err.T @ self._Q[:self._error_state_size, :self._error_state_size] @ q_err
+
+        # Compute velocity error.
+        vel_err = xi - xi_ref
+        vel_err = vel_err.reshape(6,1)
+        v_cost = vel_err.T @ self._Q[self._error_state_size:, self._error_state_size:] @ vel_err
+
+        # Compute control cost.
+        u_cost = u.T @ self._R @ u
+
+        return (q_cost + v_cost + u_cost).reshape(-1)[0]
+
+    def _l_terminal(self, x, i):
+        """Terminal cost function.
+
+        Args:
+            x: Current state, list of pose and twist, [q, xi]:
+                q:  SE3 matrix, 4x4
+                xi: twist velocity
+            i: Current time step.
+
+        Returns:
+            Instantaneous cost (scalar).
+        """
+        q, xi = x 
+        q = SE32manifSE3( q )
+
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        # Compute the logarithmic map of the pose error.
+        # q_err = q.rminus( q_ref ).coeffs()
+        q_err = q.lminus( q_ref ).coeffs()
+        q_err = manifse32se3(q_err).reshape(6,1)
+        q_cost = q_err.T @ self._Q[:self._error_state_size, :self._error_state_size] @ q_err
+
+        # Compute velocity error.
+        vel_err = xi - xi_ref
+        vel_err = vel_err.reshape(6,1)
+        v_cost = vel_err.T @ self._Q[self._error_state_size:, self._error_state_size:] @ vel_err
+
+        return (q_cost + v_cost).reshape(-1)[0]
+
+    
+    def l(self, x, u, i, terminal=False):
+        """Instantaneous cost function.
+
+        Args:
+            x: Current state, list of pose and twist, [q, xi].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            Instantaneous cost (scalar).
+        """
+        if terminal:
+            return self._l_terminal(x,i)
+
+        return self._l(x,u,i)
+
+    def l_x(self, x, u, i, terminal=False):
+        """Partial derivative of cost function with respect to x.
+
+        Args:
+            x: Current state, list of pose and twist, [q, xi].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            dl/dx [state_size].
+        """
+        q, xi = x 
+        q = SE32manifSE3( q )
+
+        q_ref = self._q_ref[i] 
+        xi_ref = self._xi_ref[i]
+
+        J_e_x = np.empty((6,6))
+        # err = manifse32se3(q.rminus(q_ref, J_e_x)).reshape(6,1)
+        err = manifse32se3(q.lminus(q_ref, J_e_x)).reshape(6,1)
+        J_e_x = Jmnf2J(J_e_x)
+        J_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ err
+
+        J_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:] @ ( xi - xi_ref ).reshape(6,1)
+        
+        return np.vstack(
+            (J_err, J_xi)
+        ).reshape((self.state_size,))
+
+    def l_u(self, x, u, i, terminal=False):
+        """Partial derivative of cost function with respect to u.
+
+        Args:
+            x: Current state, list of pose and twist, [q, xi].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            dl/du [action_size].
+        """
+        return 2 * self._R @ u
+
+    def l_xx(self, x, u, i, terminal=False):
+        """Second partial derivative of cost function with respect to x.
+            Derived using Gauss-Newton.
+
+        Args:
+            x: Current state, list of pose and twist, [q, xi].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            d^2l/dx^2 [state_size, state_size].
+        """
+        q, _ = x 
+        q = SE32manifSE3( q )
+
+        q_ref = self._q_ref[i] 
+
+        J_e_x = np.empty((6,6))
+        # _ = q.rminus(q_ref, J_e_x)
+        _ = q.lminus(q_ref, J_e_x)
+        J_e_x = Jmnf2J(J_e_x)
+        H_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ J_e_x
+
+        H_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:]
+        
+        return np.block([
+            [ H_err, np.zeros((6,6)) ],
+            [ np.zeros((6,6)), H_xi  ],
+        ])
+
+    def l_ux(self, x, u, i, terminal=False):
+        """Second partial derivative of cost function with respect to u and x.
+
+        Args:
+            x: Current state, list of pose and twist, [q, xi].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            d^2l/dudx [action_size, state_size].
+        """
+        return np.zeros((self.action_size,self.state_size))
+
+    def l_uu(self, x, u, i, terminal=False):
+        """Second partial derivative of cost function with respect to u.
+
+        Args:
+            x: Current state, list of pose and twist, [q, xi].
+            u: Current control [action_size]. None if terminal.
+            i: Current time step.
+            terminal: Compute terminal cost. Default: False.
+
+        Returns:
+            d^2l/du^2 [action_size, action_size].
+        """
+        return 2 * self._R
+
+
 # =================================================================================
 # Lagrangian Cost
 # =================================================================================
