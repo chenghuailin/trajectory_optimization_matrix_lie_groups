@@ -78,19 +78,38 @@ jax.config.update("jax_enable_x64", True)
 # Other Reference Import
 # =====================================================
 
-path_to_reference_file = \
-    'visualization/optimized_trajectories/path_3dpendulum_8shape.npy'
+# path_to_reference_file = \
+#     'visualization/optimized_trajectories/path_3dpendulum_8shape.npy'
     
-with open( path_to_reference_file, 'rb' ) as f:
-    q_ref = np.load(f)
-    xi_ref = np.load(f)
-    dt = np.load(f)
+# with open( path_to_reference_file, 'rb' ) as f:
+#     q_ref = np.load(f)
+#     xi_ref = np.load(f)
+#     dt = np.load(f)
 
-Nsim = q_ref.shape[0] - 1
-print("Horizon of dataset is", Nsim)
+# Nsim = q_ref.shape[0] - 1
+# print("Horizon of dataset is", Nsim)
 
-q0 = SO3( Rotation.from_matrix(q_ref[0]).as_quat() ) 
-xi0 = SO3Tangent( xi_ref[0] )
+# q0 = SO3( Rotation.from_matrix(q_ref[0]).as_quat() ) 
+# xi0 = SO3Tangent( xi_ref[0] )
+# x0 = [ q0, xi0 ]
+
+# =====================================================
+# Swing Up Task
+# =====================================================
+
+ONLY_TERMINAL = False
+
+Nsim = 80
+dt = 0.025
+
+q_ref = Rotation.from_euler('x', 180., degrees=True).as_matrix()
+xi_ref = np.array([0.,0.,0.])
+q_ref = np.tile(q_ref, (Nsim+1,1,1))
+xi_ref = np.tile(xi_ref,(Nsim+1,1))
+
+q0 = SO3( Rotation.from_euler('y', 50., degrees=True).as_quat() )
+# q0 = SO3.Identity()
+xi0 = SO3Tangent( [0.,0.,0.] )
 x0 = [ q0, xi0 ]
 
 # =====================================================
@@ -101,7 +120,7 @@ J = np.diag([ 0.5,0.7,0.9 ])
 m = 1
 length = 0.5
 
-N = Nsim
+N = Nsim # horizon, note the state length = horizon + 1
 HESSIANS = False
 action_size = 3
 state_size = 6
@@ -113,6 +132,7 @@ debug_dyn = {"vel_zero": False}
 
 print("Dynamics Instatiation")
 dynamics = Pendulum3dDyanmics(J, m, length, dt, hessians=HESSIANS, debug=debug_dyn)
+# dynamics = SO3Dynamics(J, dt, hessians=HESSIANS, debug=debug_dyn)
 print("Dynamics Instatiation Finished")
 
 # =====================================================
@@ -124,6 +144,12 @@ Q = np.diag([
 ])
 P = Q * 10
 R = np.identity(3) * 1e-5
+
+# Q = np.diag([ 
+#     10., 10., 10., 1., 1., 1.,
+# ]) * 1000
+# P = Q * 10
+# R = np.identity(3) * 1e-5
 
 print("Cost Instatiation")
 start_time = time.time() 
@@ -162,7 +188,7 @@ qref_ilqr = [ SO3(Rotation.from_matrix(x).as_quat()) for x in q_ref]
 norm_q_err = np.array([np.linalg.norm(err_ilqr[i][0],ord=2) for i in range( len(err_ilqr) )])
 norm_vel_err = np.array([np.linalg.norm(err_ilqr[i][1],ord=2) for i in range( len(err_ilqr) )])
 
-q_euler_ilqr = np.array([ rotm2euler(x[0].rotation()) for x in xs_ilqr ] )
+q_euler_ilqr = np.array([ rotm2euler(x[0].rotation(), order='zyx') for x in xs_ilqr ] )
 vel_ilqr = np.array([ x[1].coeffs() for x in xs_ilqr ])
 
 pendulum_length = 1.2
@@ -172,38 +198,68 @@ rod_pos_sol = np.array([rotm.rotation() @ updown_vector for rotm in q_ilqr]).res
 rod_pos_ref = np.array([rotm.rotation() @ updown_vector for rotm in qref_ilqr]).reshape(N+1, 3)
 
 # =====================================================
+# Pendulum Translation Integration
+# =====================================================
+
+vel_cm = np.zeros((Nsim+1, 3))
+pos_cm = np.zeros((Nsim+1, 3))
+pos_pivot = np.zeros((Nsim+1, 3))
+
+q_rotm_ilqr = np.array([ x.rotation() for x in q_ilqr])
+g_acc = dynamics.g
+
+for i in range( Nsim ):
+    # vel_cm[i+1] = vel_cm[i] + dt * ( q_rotm_ilqr[i].T @ ( g_acc + us_ilqr[i] ) )
+    vel_cm[i+1] = vel_cm[i] + dt * ( q_rotm_ilqr[i].T @ (  us_ilqr[i] ) )
+    pos_cm[i+1] = pos_cm[i] + dt * vel_cm[i]
+
+down_vec = np.array([0,0,-1.])
+rho = length / 2 * down_vec
+
+for i in range(Nsim+1):
+    pos_pivot[i] = pos_cm[i] + q_rotm_ilqr[i] @ (-1 * rho)
+
+# =====================================================
 # Rerun Logging
 # =====================================================
 
-# rr.init("pendulum_animation", spawn=True, recording_id="3d_inverted_pendulum")
+rr.init("pendulum_animation", spawn=True, recording_id="3d_inverted_pendulum")
 
-# pendulum_urdf_path = "./visualization/rerun/3d_inverted_pendulum.urdf"
-# urdf_logger = URDFLogger(pendulum_urdf_path, None)
-# urdf_logger.entity_path_prefix = f"solution_ms/pendulum_urdf"
-# urdf_logger.log()
+pendulum_urdf_path = "./visualization/rerun/3d_inverted_pendulum.urdf"
+urdf_logger = URDFLogger(pendulum_urdf_path, None)
+urdf_logger.entity_path_prefix = f"solution_ms/pendulum_urdf"
+urdf_logger.log()
 
-# for step in range(N):
+for step in range(N):
 
-#     rr.set_time_seconds( "sim_time", dt * step )
+    rr.set_time_seconds( "sim_time", dt * step )
 
-#     rr.log(
-#         f"solution_ms/position",
-#         rr.Points3D(
-#             rod_pos_sol[step] #,
-#             # colors=vel_mapped_color,
-#         ),
-#     )
+    # rr.log(
+    #     f"solution_ms/rod_position",
+    #     rr.Points3D(
+    #         rod_pos_sol[step] #,
+    #         # colors=vel_mapped_color,
+    #     ),
+    # )
 
-#     rr.log(
-#         f"solution_ms/pendulum_urdf",
-#         rr.Transform3D(
-#             translation=np.array([0.,0.,0.]),
-#             rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
-#             axis_length=1.0,
-#         ),
-#     )
+    rr.log(
+        f"solution_ms/pivot_accleration",
+        rr.Arrows3D(
+            vectors=us_ilqr[step],
+            origins=pos_pivot[step],
+        ),
+    )
 
-# print("Rerun logging finished")
+    rr.log(
+        f"solution_ms/pendulum_urdf",
+        rr.Transform3D(
+            translation=np.array(pos_pivot[step]),
+            rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
+            axis_length=1.0,
+        ),
+    )
+
+print("Rerun logging finished")
 
 # =====================================================
 # Visualization by State
