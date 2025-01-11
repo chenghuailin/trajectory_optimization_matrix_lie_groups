@@ -1259,8 +1259,9 @@ class iLQR_Tracking_SO3_MS(BaseController):
                             accepted = True
                             print("Line Search Finished")
                             break
-
-                    print("Line Search Finished, Step Size Exhausted")
+                            
+                        if alpha == alphas[-1]:
+                            print("Line Search Finished, Step Size Exhausted")
                 
                 else:
                     alpha = 1
@@ -2352,6 +2353,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
         self._defect_rho = 0.5
         self._defect_gamma = 0.05
         self._defect_mu_min = self._defect_mu0
+        self._defect_kappa = 1e-14
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
@@ -2413,7 +2415,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         # Backtracking line search candidates 0 < alpha <= 1.
         # alphas = 1.1**(-np.arange(10)**2)
-        alphas = 1.1**(-np.arange(13)**2)
+        alphas = 1.1**(-np.arange(20)**2)
 
         us = us_init.copy()
         k = self._k
@@ -2516,7 +2518,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
                             print("Line Search Finished")
                             break
 
-                    print("Line Search Finished, Step Size Exhausted")
+                        if alpha == alphas[-1]:
+                            print("Line Search Finished, Step Size Exhausted")
                 
                 else:
                     alpha = 1
