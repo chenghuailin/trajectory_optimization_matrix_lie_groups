@@ -79,7 +79,7 @@ jax.config.update("jax_enable_x64", True)
 # =====================================================
 
 path_to_reference_file = \
-    'visualization/optimized_trajectories/path_3dpendulum_8shape.npy'
+    'visualization/optimized_trajectories/path_3dpendulum_8shape_tryout.npy'
     
 with open( path_to_reference_file, 'rb' ) as f:
     q_ref = np.load(f)
@@ -89,8 +89,12 @@ with open( path_to_reference_file, 'rb' ) as f:
 Nsim = q_ref.shape[0] - 1
 print("Horizon of dataset is", Nsim)
 
-q0 = SO3( Rotation.from_matrix(q_ref[0]).as_quat() ) 
-xi0 = SO3Tangent( xi_ref[0] )
+# q0 = SO3( Rotation.from_matrix(q_ref[0]).as_quat() ) 
+# xi0 = SO3Tangent( xi_ref[0] )
+
+q0 = SO3( Rotation.from_euler('zxy', [90.,10.,45.], degrees=True).as_quat() ) 
+omega0 = 1e-1
+xi0 = SO3Tangent([ omega0,omega0,omega0 ])
 x0 = [ q0, xi0 ]
 
 # =====================================================
@@ -173,35 +177,35 @@ rod_pos_ref = np.array([rotm.rotation() @ updown_vector for rotm in qref_ilqr]).
 # Rerun Logging
 # =====================================================
 
-rr.init("pendulum_animation", spawn=True, recording_id="3d_inverted_pendulum")
+# rr.init("pendulum_animation", spawn=True, recording_id="3d_inverted_pendulum")
 
-pendulum_urdf_path = "./visualization/rerun/3d_inverted_pendulum.urdf"
-urdf_logger = URDFLogger(pendulum_urdf_path, None)
-urdf_logger.entity_path_prefix = f"solution_ms/pendulum_urdf"
-urdf_logger.log()
+# pendulum_urdf_path = "./visualization/rerun/3d_inverted_pendulum.urdf"
+# urdf_logger = URDFLogger(pendulum_urdf_path, None)
+# urdf_logger.entity_path_prefix = f"solution_ms/pendulum_urdf"
+# urdf_logger.log()
 
-for step in range(N):
+# for step in range(N):
 
-    rr.set_time_seconds( "sim_time", dt * step )
+#     rr.set_time_seconds( "sim_time", dt * step )
 
-    rr.log(
-        f"solution_ms/position",
-        rr.Points3D(
-            rod_pos_sol[step] #,
-            # colors=vel_mapped_color,
-        ),
-    )
+#     rr.log(
+#         f"solution_ms/position",
+#         rr.Points3D(
+#             rod_pos_sol[step] #,
+#             # colors=vel_mapped_color,
+#         ),
+#     )
 
-    rr.log(
-        f"solution_ms/pendulum_urdf",
-        rr.Transform3D(
-            translation=np.array([0.,0.,0.]),
-            rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
-            axis_length=1.0,
-        ),
-    )
+#     rr.log(
+#         f"solution_ms/pendulum_urdf",
+#         rr.Transform3D(
+#             translation=np.array([0.,0.,0.]),
+#             rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
+#             axis_length=1.0,
+#         ),
+#     )
 
-print("Rerun logging finished")
+# print("Rerun logging finished")
 
 # =====================================================
 # Visualization by State
