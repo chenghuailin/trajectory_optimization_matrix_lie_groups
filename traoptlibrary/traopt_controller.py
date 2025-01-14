@@ -1190,6 +1190,14 @@ class iLQR_Tracking_SO3_MS(BaseController):
                 L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
             d_norm = self._compute_defect_norm( d )
             J_opt = L.sum()
+
+            # _, grad_wrt_input_norm = self._gradient_wrt_control_ss( F_x, F_u, L_x, L_u )
+            # if grad_wrt_input_norm < tol_grad_norm and d_norm < tol_d_norm:
+            #     converged = True
+            #     accepted = True
+            #     print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
+            #     break
+            # print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
@@ -1751,6 +1759,34 @@ class iLQR_Tracking_SO3_MS(BaseController):
         for t in range(self.N - 1, -1, -1):
             g[t] = L_u[t] + np.matmul( F_u[t].T, V_x[t+1] + np.matmul(V_xx[t+1].T, d[t]) )
             g_norm_sum = g_norm_sum + np.linalg.norm(g[t])
+
+        return g, g_norm_sum/self.N
+    
+    def _gradient_wrt_control_ss(self, F_x, F_u, L_x, L_u):
+        """Solve adjoint equations using a for loop.
+
+        Args:
+            F_x: dynamics Jacobians with respect to state.
+            F_u: dynamics Jacobians with respect to control.
+            L_x: cost gradients with respect to state.
+            L_u: cost gradients with respect to control.
+
+        Returns:
+            gradient, adjoints, final adjoint variable.
+        """
+
+        # P = np.zeros((self.N + 1, self._state_size))
+        g = np.zeros((self.N, self._action_size))
+
+        p = L_x[self.N] # Initialize adjoint variable with terminal cost gradient
+        # P[self.N] = p
+        g_norm_sum = 0
+        
+        for t in range(self.N - 1, -1, -1):  # backward recursion of Adjoint equations.
+            g[t] = L_u[t] + np.matmul(F_u[t].T, p)
+            p = L_x[t] + np.matmul(F_x[t].T, p) 
+            g_norm_sum = g_norm_sum + np.linalg.norm(g[t])
+            # P[t] = p
 
         return g, g_norm_sum/self.N
     
@@ -2448,6 +2484,14 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
             d_norm = self._compute_defect_norm( d )
             J_opt = L.sum()
+
+            # _, grad_wrt_input_norm = self._gradient_wrt_control_ss( F_x, F_u, L_x, L_u )
+            # if grad_wrt_input_norm < tol_grad_norm and d_norm < tol_d_norm:
+            #     converged = True
+            #     accepted = True
+            #     print("Iteration", iteration-1, "converged, gradient w.r.t. input:", grad_wrt_input_norm )
+            #     break
+            # print("Iteration:", iteration, "Gradient w.r.t. input:", grad_wrt_input_norm )
             
             end_time = time.perf_counter()
             time_calc = end_time - start_time
@@ -3019,6 +3063,34 @@ class iLQR_Tracking_SE3_MS(BaseController):
         for t in range(self.N - 1, -1, -1):
             g[t] = L_u[t] + np.matmul( F_u[t].T, V_x[t+1] + np.matmul(V_xx[t+1].T, d[t]) )
             g_norm_sum = g_norm_sum + np.linalg.norm(g[t])
+
+        return g, g_norm_sum/self.N
+
+    def _gradient_wrt_control_ss(self, F_x, F_u, L_x, L_u):
+        """Solve adjoint equations using a for loop.
+
+        Args:
+            F_x: dynamics Jacobians with respect to state.
+            F_u: dynamics Jacobians with respect to control.
+            L_x: cost gradients with respect to state.
+            L_u: cost gradients with respect to control.
+
+        Returns:
+            gradient, adjoints, final adjoint variable.
+        """
+
+        # P = np.zeros((self.N + 1, self._state_size))
+        g = np.zeros((self.N, self._action_size))
+
+        p = L_x[self.N] # Initialize adjoint variable with terminal cost gradient
+        # P[self.N] = p
+        g_norm_sum = 0
+        
+        for t in range(self.N - 1, -1, -1):  # backward recursion of Adjoint equations.
+            g[t] = L_u[t] + np.matmul(F_u[t].T, p)
+            p = L_x[t] + np.matmul(F_x[t].T, p) 
+            g_norm_sum = g_norm_sum + np.linalg.norm(g[t])
+            # P[t] = p
 
         return g, g_norm_sum/self.N
     
