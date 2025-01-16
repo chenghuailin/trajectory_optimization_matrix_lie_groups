@@ -6,7 +6,8 @@ from traoptlibrary.traopt_utilis import rotm2euler
 from traoptlibrary.traopt_dynamics import SO3Dynamics
 from traoptlibrary.traopt_cost import SO3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_controller import iLQR_Tracking_SO3_MS, iLQR_Tracking_SO3
-from traoptlibrary.traopt_baseline import EmbeddedEuclideanSO3, ConstraintStabilizationSO3
+from traoptlibrary.traopt_baseline import EmbeddedEuclideanSO3, ConstraintStabilizationSO3,\
+                                            EmbeddedEuclideanSO3_MatrixNorm, ConstraintStabilizationSO3_MatrixNorm
 from scipy.spatial.transform import Rotation
 from manifpy import SO3, SO3Tangent
 
@@ -62,14 +63,14 @@ print("Horizon of dataset is", Nsim)
 q0 = SO3( 
     Rotation.from_euler('zxy', [90.,10.,45.], degrees=True).as_quat() 
 ) 
-omega0 = 1e-1
+omega0 = 1.7 * 1e-1
 xi0 = SO3Tangent( np.ones((3,1)) * omega0 )
 x0_mnf = [ q0, xi0 ]
 x0_np = [ q0.rotation(), xi0.coeffs() ]
 
-J = np.diag([ 0.5,0.7,0.9 ])
+J = np.diag([ 0.5, 0.7, 0.9 ])
 
-max_iterations = 100
+max_iterations = 50
 
 tol_gradiant_converge = 1e-12
 tol_converge = tol_gradiant_converge
@@ -101,7 +102,7 @@ dynamics = SO3Dynamics( J, dt, hessians=HESSIANS )
 
 Q = np.diag([10., 10., 10., 1., 1., 1.,])
 P = Q * 10
-R = np.identity(3) * 1e-5
+R = np.identity(3) * 1e-1 * 2
 cost = SO3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref )
 
 us_init = np.zeros((N, action_size,))
@@ -109,27 +110,27 @@ us_init = np.zeros((N, action_size,))
 ilqr_ms_so3 = iLQR_Tracking_SO3_MS( dynamics, cost, N, 
                                     q_ref, xi_ref,
                                     hessians=HESSIANS,
-                                    line_search=True,
+                                    line_search=False,
                                     rollout='nonlinear' )
 
 ilqr_ss_so3 = iLQR_Tracking_SO3(    dynamics, cost, N, 
                                     hessians=HESSIANS,
                                     rollout='nonlinear' )
 
-# xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
-#     grad_hist_ms_so3, defect_hist_ms_so3= \
-#         ilqr_ms_so3.fit(x0_mnf, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ms_so3)
-# xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
+xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
+    grad_hist_ms_so3, defect_hist_ms_so3= \
+        ilqr_ms_so3.fit(x0_mnf, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ms_so3)
+xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
 
-# xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
-#         ilqr_ss_so3.fit(x0_mnf, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ss_so3)
-# xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
+xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
+        ilqr_ss_so3.fit(x0_mnf, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ss_so3)
+xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
 
 # =====================================================
 # Embedded Space Method
@@ -138,12 +139,12 @@ ilqr_ss_so3 = iLQR_Tracking_SO3(    dynamics, cost, N,
 # intialize the embedded method
 ipopt_unconstr_euc = EmbeddedEuclideanSO3( q_ref, xi_ref, dt, J, Q, R )
 
-# # get the solution
-# xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
-#     grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
-#         ipopt_unconstr_euc.fit( x0_np, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
+    grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
+        ipopt_unconstr_euc.fit( x0_np, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 # =====================================================
 # Constraint Stabilization Method
@@ -152,101 +153,111 @@ ipopt_unconstr_euc = EmbeddedEuclideanSO3( q_ref, xi_ref, dt, J, Q, R )
 # intialize the embedded method
 ipopt_constr_euc = ConstraintStabilizationSO3( q_ref, xi_ref, dt, J, Q, R )
 
-# # get the solution
-# xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
-#     grad_hist_constr_euc, defect_hist_constr_euc = \
-#         ipopt_constr_euc.fit(   x0_np, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
+    grad_hist_constr_euc, defect_hist_constr_euc = \
+        ipopt_constr_euc.fit(   x0_np, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 # =====================================================
 # Save Results
 # =====================================================
 
-# def save_results_pickle(filename,
-#                        xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
-#                        xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
-#                        xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
-#                        xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc):
-#     data = {
-#         'ms_so3': {
-#             'xs': xs_ms_so3,
-#             'us': us_ms_so3,
-#             'J_hist': J_hist_ms_so3,
-#             'grad_hist': grad_hist_ms_so3,
-#             'defect_hist': defect_hist_ms_so3
-#         },
-#         'ss_so3': {
-#             'xs': xs_ss_so3,
-#             'us': us_ss_so3,
-#             'J_hist': J_hist_ss_so3,
-#             'grad_hist': grad_hist_ss_so3
-#         },
-#         'unconstr_euc': {
-#             'xs': xs_unconstr_euc,
-#             'us': us_unconstr_euc,
-#             'J_hist': J_hist_unconstr_euc,
-#             'grad_hist': grad_hist_unconstr_euc,
-#             'defect_hist': defect_hist_unconstr_euc
-#         },
-#         'constr_euc': {
-#             'xs': xs_constr_euc,
-#             'us': us_constr_euc,
-#             'J_hist': J_hist_constr_euc,
-#             'grad_hist': grad_hist_constr_euc,
-#             'defect_hist': defect_hist_constr_euc
-#         }
-#     }
+def save_results_pickle(filename,
+                       xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
+                       xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
+                       xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
+                       xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc):
+    data = {
+        'prob':{
+            'J': J,
+            'dt': dt,
+            'q_ref': q_ref,
+            'xi_ref': xi_ref,
+            'x0': x0_np,
+            'Q' : Q,
+            'P' : P,
+            'R' : R
+        },
+        'ms_so3': {
+            'xs': xs_ms_so3,
+            'us': us_ms_so3,
+            'J_hist': J_hist_ms_so3,
+            'grad_hist': grad_hist_ms_so3,
+            'defect_hist': defect_hist_ms_so3
+        },
+        'ss_so3': {
+            'xs': xs_ss_so3,
+            'us': us_ss_so3,
+            'J_hist': J_hist_ss_so3,
+            'grad_hist': grad_hist_ss_so3
+        },
+        'unconstr_euc': {
+            'xs': xs_unconstr_euc,
+            'us': us_unconstr_euc,
+            'J_hist': J_hist_unconstr_euc,
+            'grad_hist': grad_hist_unconstr_euc,
+            'defect_hist': defect_hist_unconstr_euc
+        },
+        'constr_euc': {
+            'xs': xs_constr_euc,
+            'us': us_constr_euc,
+            'J_hist': J_hist_constr_euc,
+            'grad_hist': grad_hist_constr_euc,
+            'defect_hist': defect_hist_constr_euc
+        }
+    }
     
-#     with open(filename, 'wb') as f:
-#         pickle.dump(data, f)
-#     print(f"Results saved to {filename}")
+    with open(filename, 'wb') as f:
+        pickle.dump(data, f)
+    print(f"Results saved to {filename}")
 
-# if SAVE_RESULTS:
-#     save_results_pickle(SAVE_RESULTS_DIR,
-#                        xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
-#                        xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
-#                        xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
-#                        xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc)
+if SAVE_RESULTS:
+    save_results_pickle(SAVE_RESULTS_DIR,
+                       xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
+                       xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
+                       xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
+                       xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc)
 
 
 # =====================================================
 # Load Results
 # =====================================================
 
-def load_results_pickle(filename):
-    with open(filename, 'rb') as f:
-        data = pickle.load(f)
-    return data
+# def load_results_pickle(filename):
+#     with open(filename, 'rb') as f:
+#         data = pickle.load(f)
+#     return data
 
-results = load_results_pickle(SAVE_RESULTS_DIR)
+# results = load_results_pickle(SAVE_RESULTS_DIR)
 
-ms_so3_data = results['ms_so3']
-xs_ms_so3 = ms_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-us_ms_so3 = ms_so3_data['us']            # 控制序列 (numpy 数组)
-J_hist_ms_so3 = ms_so3_data['J_hist']    # 目标函数历史 (列表)
-grad_hist_ms_so3 = ms_so3_data['grad_hist']  # 梯度范数历史 (列表)
-defect_hist_ms_so3 = ms_so3_data['defect_hist']  # 缺陷范数历史 (列表)
+# ms_so3_data = results['ms_so3']
+# xs_ms_so3 = ms_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+# us_ms_so3 = ms_so3_data['us']            # 控制序列 (numpy 数组)
+# J_hist_ms_so3 = ms_so3_data['J_hist']    # 目标函数历史 (列表)
+# grad_hist_ms_so3 = ms_so3_data['grad_hist']  # 梯度范数历史 (列表)
+# defect_hist_ms_so3 = ms_so3_data['defect_hist']  # 缺陷范数历史 (列表)
 
-ss_so3_data = results['ss_so3']
-xs_ss_so3 = ss_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-us_ss_so3 = ss_so3_data['us']            # 控制序列 (numpy 数组)
-J_hist_ss_so3 = ss_so3_data['J_hist']    # 目标函数历史 (列表)
-grad_hist_ss_so3 = ss_so3_data['grad_hist']  # 梯度范数历史 (列表)
+# ss_so3_data = results['ss_so3']
+# xs_ss_so3 = ss_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+# us_ss_so3 = ss_so3_data['us']            # 控制序列 (numpy 数组)
+# J_hist_ss_so3 = ss_so3_data['J_hist']    # 目标函数历史 (列表)
+# grad_hist_ss_so3 = ss_so3_data['grad_hist']  # 梯度范数历史 (列表)
 
-unconstr_euc_data = results['unconstr_euc']
-xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
-us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
-J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
-grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
-defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
+# unconstr_euc_data = results['unconstr_euc']
+# xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
+# us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
+# J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+# grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+# defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
 
-constr_euc_data = results['constr_euc']
-xs_constr_euc = constr_euc_data['xs']                      # 状态序列 (numpy 数组)
-us_constr_euc = constr_euc_data['us']                      # 控制序列 (numpy 数组)
-J_hist_constr_euc = constr_euc_data['J_hist']              # 目标函数历史 (numpy 数组)
-grad_hist_constr_euc = constr_euc_data['grad_hist']        # 梯度范数历史 (numpy 数组)
-defect_hist_constr_euc = constr_euc_data['defect_hist']    # 缺陷范数历史 (numpy 数组)
+# constr_euc_data = results['constr_euc']
+# xs_constr_euc = constr_euc_data['xs']                      # 状态序列 (numpy 数组)
+# us_constr_euc = constr_euc_data['us']                      # 控制序列 (numpy 数组)
+# J_hist_constr_euc = constr_euc_data['J_hist']              # 目标函数历史 (numpy 数组)
+# grad_hist_constr_euc = constr_euc_data['grad_hist']        # 梯度范数历史 (numpy 数组)
+# defect_hist_constr_euc = constr_euc_data['defect_hist']    # 缺陷范数历史 (numpy 数组)
 
 
 # =====================================================
@@ -302,9 +313,8 @@ plt.plot( violation_det_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_det_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( violation_det_constr_euc, label='Embedded Stabilization' )
 plt.yscale('log')
-plt.ylabel(r'$||\text{det}(R)-1||$')
+plt.ylabel(r'$|\text{det}(R)-1|$')
 plt.xlabel('Stage')
-plt.legend()
 plt.grid()
 
 # 2. Dynamics violation comparison:
@@ -357,7 +367,7 @@ plt.plot( grad_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( grad_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( grad_hist_constr_euc, label='Embedded Stabilization' )
 plt.yscale('log')
-plt.ylabel('Convergence')
+plt.ylabel('Gradiant')
 plt.xlabel('Iteration')
 plt.legend()
 plt.grid()
@@ -367,7 +377,7 @@ plt.plot( defect_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( defect_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( defect_hist_constr_euc, label='Embedded Stabilization' )
 plt.yscale('log')
-plt.ylabel('Dynamics Defect')
+plt.ylabel(r'$||d||$')
 plt.xlabel('Iteration')
 plt.legend()
 plt.grid()
@@ -558,9 +568,5 @@ ax.set_zlim(-1, 1)
 # =====================================================
 
 # For Single Shooting, initial rollout and geodesic angle relation
-
-
-
-
 
 plt.show()

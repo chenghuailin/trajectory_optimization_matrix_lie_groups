@@ -14,15 +14,17 @@ import rerun as rr
 sys.path.append("visualization/rerun")
 from rerun_loader_urdf import URDFLogger
 from scipy.spatial.transform import Rotation
+from manifpy import SE3, SE3Tangent
 
 
 def on_iteration(iteration_count, xs, us, J_opt, accepted, 
                 converged, defect_norm, grad_wrt_input_norm,
-                alpha, mu, J_hist, xs_hist, us_hist, grad_hist):
+                alpha, mu, J_hist, xs_hist, us_hist, grad_hist, defect_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
     grad_hist.append(grad_wrt_input_norm.copy())
+    defect_hist.append(defect_norm)
 
     info = "converged" if converged else ("accepted" if accepted else "failed")
     print("Iteration", iteration_count, \
@@ -102,7 +104,7 @@ dt = 0.004
 path_to_reference_file = \
     'visualization/optimized_trajectories/path_dense_random_columns_4obj.npy'
     # 'visualization/optimized_trajectories/path_dense_random_columns.npy'
-    # 'visualization/optimized_trajectories/path_dense_random_columns_4obj.npy'
+    
 with open( path_to_reference_file, 'rb' ) as f:
     q_ref = np.load(f)
     xi_ref = np.load(f)
@@ -110,8 +112,15 @@ with open( path_to_reference_file, 'rb' ) as f:
 Nsim = q_ref.shape[0] - 1
 print("Horizon of dataset is", Nsim)
 
-q0 = q_ref[0]
-xi0 = xi_ref[0]
+# q0 = q_ref[0]
+# xi0 = xi_ref[0]
+# x0 = [ q0, xi0 ]
+
+q0 = SE3(
+    position = -1 * np.ones((3,)) + q_ref[0][:3,3],
+    quaternion = Rotation.from_euler('zxy', [90.,10.,45.], degrees=True).as_quat() 
+).transform()
+xi0 = np.ones((6,)) * 1e-1
 x0 = [ q0, xi0 ]
 
 # =====================================================
@@ -177,8 +186,8 @@ ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N,
                             line_search=False,
                             rollout='nonlinear')
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
-        ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr, defect_hist_ilqr = \
+        ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration, tol_grad_norm=1e-12)
 
 
 # =====================================================

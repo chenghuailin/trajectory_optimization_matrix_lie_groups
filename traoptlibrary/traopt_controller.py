@@ -1964,8 +1964,8 @@ class iLQR_Tracking_SE3(BaseController):
                     print("Iteration:", iteration, "Rollout Finished, Used Time:", time_calc, "Alpha:", alpha, "Cost:", J_new )
 
                     if J_new < J_opt:
-                        if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                            converged = True
+                        # if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                        #     converged = True
 
                         J_opt = J_new
                         xs = xs_new
@@ -2465,6 +2465,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
         xs_hist = []
         us_hist = []
         grad_hist = []
+        defect_hist = []
 
         converged = False
 
@@ -2487,6 +2488,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
             (d, F_x, F_u, L, L_x, L_u, L_xx, L_ux, 
                 L_uu, F_xx, F_ux, F_uu) = self._linearization(xs, us)
             d_norm = self._compute_defect_norm( d )
+            if iteration == 0:
+                defect_hist.append(d_norm)
             J_opt = L.sum()
 
             # _, grad_wrt_input_norm = self._gradient_wrt_control_ss( F_x, F_u, L_x, L_u )
@@ -2554,8 +2557,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
                               "\n          Alpha:", alpha, "Cost:", J_new, "Merit:", merit_new,  )
 
                         if merit_new - merit < self._defect_gamma * ( J_expected_change - alpha * d_weight * d_norm ):
-                            if np.abs((J_opt - J_new) / J_opt) < tol_J and d_norm <  tol_d_norm:
-                                converged = True
+                            # if np.abs((J_opt - J_new) / J_opt) < tol_J and d_norm <  tol_d_norm:
+                            #     converged = True
 
                             J_opt = J_new
                             xs = xs_new
@@ -2579,8 +2582,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
                     accepted = True
 
-                    if np.abs((J_opt - J_new) / J_opt) < tol_J:
-                        converged = True
+                    # if np.abs((J_opt - J_new) / J_opt) < tol_J:
+                    #     converged = True
 
                 end_time = time.perf_counter()
                 time_calc = end_time - start_time   
@@ -2603,7 +2606,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
                             accepted, converged, d_norm_new,
                             grad_wrt_input_norm,
                             alpha, self._mu, 
-                            J_hist, xs_hist, us_hist, grad_hist)
+                            J_hist, xs_hist, us_hist, grad_hist, defect_hist)
                     
             if converged:
                 break
@@ -2616,7 +2619,7 @@ class iLQR_Tracking_SE3_MS(BaseController):
         self._k = k
         self._K = K
 
-        return xs, us, J_hist, xs_hist, us_hist, grad_hist
+        return xs, us, J_hist, xs_hist, us_hist, grad_hist, defect_hist
 
     def _rollout(self, xs, us, k, K, d, 
                  F_x, F_u, alpha=1.0,
