@@ -17,11 +17,12 @@ import rerun as rr
 
 def on_iteration(iteration_count, xs, us, J_opt, accepted, 
                 converged, defect_norm, grad_wrt_input_norm,
-                alpha, mu, J_hist, xs_hist, us_hist, grad_hist):
+                alpha, mu, J_hist, xs_hist, us_hist, grad_hist, defect_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
     grad_hist.append(grad_wrt_input_norm.copy())
+    defect_hist.append( defect_norm )
 
     info = "converged" if converged else ("accepted" if accepted else "failed")
     print("Iteration", iteration_count, \
@@ -33,53 +34,12 @@ key = random.key(seed)
 jax.config.update("jax_enable_x64", True)
 
 # =====================================================
-# Tracking Reference Generation 
-# =====================================================
-
-# Nsim = int(14/dt)   # Simulation horizon
-
-# q0_ref = Rotation.from_euler(
-#         'zyx', [ 0., 0., 0. ], degrees=True
-#         ).as_matrix()
-# xi_ref = np.array([0, 0, 1]) * 1
-
-# q_ref = np.zeros((Nsim + 1, 4, 4))  # SE(3)
-# q_ref[0] = q0_ref
-# xi_ref = np.zeros((Nsim + 1, 6,)) 
-# xi_ref[0] = xi0_ref
-
-# X = q0_ref.copy()
-
-# for i in range(Nsim):
-
-#     xi_ref_rt = xi0_ref.copy()
-
-#     # You can try some time-varying twists here:
-#     # xi_ref_rt[0] = np.sin(i / 20) * 2
-#     # xi_ref_rt[4] = np.cos(np.sqrt(i)) * 1
-#     # xi_ref_rt[5] = 1  # np.sin(np.sqrt(i)) * 1
-
-#     X = X @ expm( se3_hat( xi_ref_rt ) * dt)
-
-#     # Store the reference SE3 configuration
-#     q_ref[i + 1] = X.copy()
-
-#     # Store the reference twists
-#     xi_ref[i + 1] = xi_ref_rt.copy()
-
-
-# R0 = Rotation.from_euler(
-#     'zyx', [ 0., 0., 0. ], degrees=True
-#     ).as_matrix()
-# w0 = np.array([0., 0., 0.1]) 
-# x0 = [ R0, w0 ]
-
-# =====================================================
-# Other Reference Import
+# Reference Import
 # =====================================================
 
 path_to_reference_file = \
-    'visualization/optimized_trajectories/path_3dpendulum_8shape.npy'
+    'visualization/optimized_trajectories/path_3dpendulum_swingup.npy'
+    # 'visualization/optimized_trajectories/path_3dpendulum_8shape.npy'
     
 with open( path_to_reference_file, 'rb' ) as f:
     q_ref = np.load(f)
@@ -89,8 +49,8 @@ with open( path_to_reference_file, 'rb' ) as f:
 Nsim = q_ref.shape[0] - 1
 print("Horizon of dataset is", Nsim)
 
-q0 = SO3( Rotation.from_matrix(q_ref[0]).as_quat() ) 
-xi0 = SO3Tangent( xi_ref[0] )
+q0 = SO3( Rotation.from_euler('xy',[10., 45.], degrees=True).as_quat() ) 
+xi0 = SO3Tangent( np.array([1.,1.,0.]) * 5 )
 x0 = [ q0, xi0 ]
 
 # =====================================================
@@ -142,14 +102,8 @@ print("Dynamics Instatiation Finished")
 Q = np.diag([ 
     10., 10., 10., 1., 1., 1.,
 ])
-P = Q 
-R = np.identity(3) * 1e-3
-
-# Q = np.diag([ 
-#     10., 10., 10., 1., 1., 1.,
-# ]) * 1000
-# P = Q * 10
-# R = np.identity(3) * 1e-5
+P = Q * 10
+R = np.identity(3) * 1e-2
 
 print("Cost Instatiation")
 start_time = time.time() 
@@ -172,7 +126,8 @@ ilqr = iLQR_Tracking_SO3_MS(dynamics, cost, N,
                             line_search=True,
                             rollout='nonlinear')
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, \
+    grad_hist_ilqr, defect_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
 # =====================================================
