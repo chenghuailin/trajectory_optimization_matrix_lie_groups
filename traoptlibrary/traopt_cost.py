@@ -522,8 +522,13 @@ class SO3TrackingQuadraticGaussNewtonCost(BaseCost):
         _ = q.lminus(q_ref, J_e_x)
 
         blk_size = self.pos_state_size
-        H_err = (J_e_x.T * 2) @ self._Q[:blk_size, :blk_size] @ J_e_x
-        H_xi = 2 * self._Q[blk_size:, blk_size:]
+
+        if not terminal:
+            H_err = (J_e_x.T * 2) @ self._Q[:blk_size, :blk_size] @ J_e_x
+            H_xi = 2 * self._Q[blk_size:, blk_size:]
+        else:
+            H_err = (J_e_x.T * 2) @ self._P[:blk_size, :blk_size] @ J_e_x
+            H_xi = 2 * self._P[blk_size:, blk_size:]
         
         return np.block([
             [ H_err, np.zeros((blk_size,blk_size)) ],
@@ -723,12 +728,12 @@ class SE3TrackingQuadraticGaussNewtonCost(BaseCost):
         # q_err = q.rminus( q_ref ).coeffs()
         q_err = q.lminus( q_ref ).coeffs()
         q_err = manifse32se3(q_err).reshape(6,1)
-        q_cost = q_err.T @ self._Q[:self._error_state_size, :self._error_state_size] @ q_err
+        q_cost = q_err.T @ self._P[:self._error_state_size, :self._error_state_size] @ q_err
 
         # Compute velocity error.
         vel_err = xi - xi_ref
         vel_err = vel_err.reshape(6,1)
-        v_cost = vel_err.T @ self._Q[self._error_state_size:, self._error_state_size:] @ vel_err
+        v_cost = vel_err.T @ self._P[self._error_state_size:, self._error_state_size:] @ vel_err
 
         return (q_cost + v_cost).reshape(-1)[0]
 
@@ -772,9 +777,13 @@ class SE3TrackingQuadraticGaussNewtonCost(BaseCost):
         # err = manifse32se3(q.rminus(q_ref, J_e_x)).reshape(6,1)
         err = manifse32se3(q.lminus(q_ref, J_e_x)).reshape(6,1)
         J_e_x = Jmnf2J(J_e_x)
-        J_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ err
 
-        J_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:] @ ( xi - xi_ref ).reshape(6,1)
+        if not terminal:
+            J_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ err
+            J_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:] @ ( xi - xi_ref ).reshape(6,1)
+        else:
+            J_err = (J_e_x.T * 2) @ self._P[:self._error_state_size, :self._error_state_size] @ err
+            J_xi = 2 * self._P[self._error_state_size:, self._error_state_size:] @ ( xi - xi_ref ).reshape(6,1)
         
         return np.vstack(
             (J_err, J_xi)
@@ -816,9 +825,13 @@ class SE3TrackingQuadraticGaussNewtonCost(BaseCost):
         # _ = q.rminus(q_ref, J_e_x)
         _ = q.lminus(q_ref, J_e_x)
         J_e_x = Jmnf2J(J_e_x)
-        H_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ J_e_x
 
-        H_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:]
+        if not terminal:
+            H_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ J_e_x
+            H_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:]
+        else:
+            H_err = (J_e_x.T * 2) @ self._P[:self._error_state_size, :self._error_state_size] @ J_e_x
+            H_xi = 2 * self._P[self._error_state_size:, self._error_state_size:]
         
         return np.block([
             [ H_err, np.zeros((6,6)) ],
@@ -1014,12 +1027,12 @@ class DroneTrackingQuadraticGaussNewtonCost(BaseCost):
         # q_err = q.rminus( q_ref ).coeffs()
         q_err = q.lminus( q_ref ).coeffs()
         q_err = manifse32se3(q_err).reshape(6,1)
-        q_cost = q_err.T @ self._Q[:self._error_state_size, :self._error_state_size] @ q_err
+        q_cost = q_err.T @ self._P[:self._error_state_size, :self._error_state_size] @ q_err
 
         # Compute velocity error.
         vel_err = xi - xi_ref
         vel_err = vel_err.reshape(6,1)
-        v_cost = vel_err.T @ self._Q[self._error_state_size:, self._error_state_size:] @ vel_err
+        v_cost = vel_err.T @ self._P[self._error_state_size:, self._error_state_size:] @ vel_err
 
         return (q_cost + v_cost).reshape(-1)[0]
 
@@ -1063,9 +1076,13 @@ class DroneTrackingQuadraticGaussNewtonCost(BaseCost):
         # err = manifse32se3(q.rminus(q_ref, J_e_x)).reshape(6,1)
         err = manifse32se3(q.lminus(q_ref, J_e_x)).reshape(6,1)
         J_e_x = Jmnf2J(J_e_x)
-        J_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ err
 
-        J_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:] @ ( xi - xi_ref ).reshape(6,1)
+        if not terminal:
+            J_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ err
+            J_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:] @ ( xi - xi_ref ).reshape(6,1)
+        else:
+            J_err = (J_e_x.T * 2) @ self._P[:self._error_state_size, :self._error_state_size] @ err
+            J_xi = 2 * self._P[self._error_state_size:, self._error_state_size:] @ ( xi - xi_ref ).reshape(6,1)
         
         return np.vstack(
             (J_err, J_xi)
@@ -1107,9 +1124,13 @@ class DroneTrackingQuadraticGaussNewtonCost(BaseCost):
         # _ = q.rminus(q_ref, J_e_x)
         _ = q.lminus(q_ref, J_e_x)
         J_e_x = Jmnf2J(J_e_x)
-        H_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ J_e_x
 
-        H_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:]
+        if not terminal:
+            H_err = (J_e_x.T * 2) @ self._Q[:self._error_state_size, :self._error_state_size] @ J_e_x
+            H_xi = 2 * self._Q[self._error_state_size:, self._error_state_size:]
+        else:
+            H_err = (J_e_x.T * 2) @ self._P[:self._error_state_size, :self._error_state_size] @ J_e_x
+            H_xi = 2 * self._P[self._error_state_size:, self._error_state_size:]
         
         return np.block([
             [ H_err, np.zeros((6,6)) ],
