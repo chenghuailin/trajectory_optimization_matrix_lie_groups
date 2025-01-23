@@ -18,11 +18,12 @@ from scipy.spatial.transform import Rotation
 
 def on_iteration(iteration_count, xs, us, J_opt, accepted, 
                 converged, defect_norm, grad_wrt_input_norm,
-                alpha, mu, J_hist, xs_hist, us_hist, grad_hist):
+                alpha, mu, J_hist, xs_hist, us_hist, grad_hist, defect_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
     grad_hist.append(grad_wrt_input_norm.copy())
+    defect_hist.append( defect_norm )
 
     info = "converged" if converged else ("accepted" if accepted else "failed")
     print("Iteration", iteration_count, \
@@ -159,7 +160,7 @@ R = np.identity(6) * 1e-5
 
 print("Cost Instatiation")
 start_time = time.time() 
-cost = SE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref)
+cost = SE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref )
 end_time = time.time() 
 print("Cost Instantiation Finished")
 print(f"Cost instantiation took {end_time - start_time:.4f} seconds")
@@ -175,10 +176,11 @@ us_init = np.zeros((N, action_size,))
 ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N, 
                             q_ref, xi_ref, 
                             hessians=HESSIANS,
-                            line_search=True,
+                            line_search=False,
                             rollout='nonlinear')
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, \
+    grad_hist_ilqr, defect_hist_ilqr = \
         ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
 
 

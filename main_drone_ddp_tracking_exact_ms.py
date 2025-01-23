@@ -14,15 +14,20 @@ import rerun as rr
 sys.path.append("visualization/rerun")
 from rerun_loader_urdf import URDFLogger
 from scipy.spatial.transform import Rotation
+from manifpy import SE3, SE3Tangent
+import warnings
 
+np.seterr(over='raise', invalid='raise')
+# warnings.filterwarnings("error", category=RuntimeWarning)
 
 def on_iteration(iteration_count, xs, us, J_opt, accepted, 
                 converged, defect_norm, grad_wrt_input_norm,
-                alpha, mu, J_hist, xs_hist, us_hist, grad_hist):
+                alpha, mu, J_hist, xs_hist, us_hist, grad_hist, defect_hist):
     J_hist.append(J_opt)
     xs_hist.append(xs.copy())
     us_hist.append(us.copy())
     grad_hist.append(grad_wrt_input_norm.copy())
+    defect_hist.append( defect_norm )
 
     info = "converged" if converged else ("accepted" if accepted else "failed")
     print("Iteration", iteration_count, \
@@ -58,12 +63,39 @@ with open( path_to_reference_file, 'rb' ) as f:
     q_ref = np.load(f)
     xi_ref = np.load(f)
 
+# with open( 'temp.npy', 'rb' ) as f:
+#     q_init = np.load(f)
+#     xi_init = np.load(f)
+#     u_init = np.load(f)
+
 Nsim = q_ref.shape[0] - 1
+
+Nsim = 500
+q_ref = q_ref[:Nsim+1]
+xi_ref = xi_ref[:Nsim+1]
+# q_init = q_init[:Nsim+1]
+# xi_init = xi_init[:Nsim+1]
+# u_init = u_init[:Nsim]
+
 print("Horizon of dataset is", Nsim)
 
-q0 = q_ref[0]
-xi0 = xi_ref[0]
+# q0 = q_ref[0]
+# xi0 = xi_ref[0]
+# x0 = [ q0, xi0 ]
+
+q0 = SE3(
+    position = -0.3 * np.ones((3,)) + q_ref[0][:3,3],
+    quaternion = Rotation.identity().as_quat() 
+).transform()
+xi0 = np.ones((6,)) * 1e-3
 x0 = [ q0, xi0 ]
+
+# q0 = SE3(
+#     position = -1 * np.ones((3,)) + q_ref[0][:3,3],
+#     quaternion = Rotation.from_euler('zxy', [90.,10.,45.], degrees=True).as_quat() 
+# ).transform()
+# xi0 = np.ones((6,)) * 1e-1
+# x0 = [ q0, xi0 ]
 
 # =====================================================
 # Setup
@@ -89,33 +121,29 @@ print("Dynamics Instatiation Finished")
 
 # This cost penalizes both error deviation and velocity (both on Lie algebra)
 
-# Q = np.diag([ 
-#     25., 25., 25., 10., 10., 10.,
-#     1., 1., 1., 1., 1., 1. 
-# ]) 
-
 Q = np.diag([ 
     25., 25., 25., 10., 10., 10.,
     1., 1., 1., 1., 1., 1. 
 ]) 
 
-# Q = np.identity(12) * 1e4
 # Q = np.diag([ 
-#     10., 10., 10., 10., 10., 10.,
+#     25., 25., 25., 30., 30., 30.,
 #     1., 1., 1., 1., 1., 1. 
-# ]) * 100
+# ]) 
 
+# Q = np.diag([ 
+#     25., 25., 25., 25., 25., 25.,
+#     1., 1., 1., 1., 1., 1. 
+# ]) 
 
-# P = np.diag([
-#     10., 10., 10., 1., 1., 1.,
-#     1., 1., 1., 1., 1., 1.  
-# ]) * 10
-# P = Q * 10
 P = Q * 10
-# P = Q 
 
-R = np.identity(action_size) * 1e-5
-# R = np.zeros((6,6))
+R = np.identity(action_size) * 1e-2
+# R = np.identity(action_size) * 1e-2
+
+# R_omega = 1e-3
+# R_z = 1e-3
+# R = np.diag([ R_omega, R_omega, R_omega, R_z ])
 
 print("Cost Instatiation")
 start_time = time.time() 
@@ -136,11 +164,22 @@ us_init = np.zeros((N, action_size,))
 ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N, 
                             q_ref, xi_ref, 
                             hessians=HESSIANS,
-                            line_search=True,
+                            line_search=False,
                             rollout='nonlinear')
 
-xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, grad_hist_ilqr = \
-        ilqr.fit(x0, us_init, n_iterations=200, on_iteration=on_iteration)
+xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, \
+    grad_hist_ilqr, defect_hist_ilqr = \
+        ilqr.fit(x0, us_init, n_iterations=100, on_iteration=on_iteration)
+
+# ilqr = iLQR_Tracking_SE3_MS(dynamics, cost, N, 
+#                             q_init, xi_init, 
+#                             hessians=HESSIANS,
+#                             line_search=False,
+#                             rollout='nonlinear')
+
+# xs_ilqr, us_ilqr, J_hist_ilqr, xs_hist_ilqr, us_hist_ilqr, \
+#     grad_hist_ilqr, defect_hist_ilqr = \
+#         ilqr.fit(x0, u_init, n_iterations=200, on_iteration=on_iteration)
 
 
 # =====================================================
@@ -169,37 +208,37 @@ final_positions = np.array([x[0][:3, 3] for x in xs_ilqr])  # Final trajectory p
 # Rerun Logging: Need to Open the server first
 # =====================================================
 
-rr.init("trajectory_animation",  spawn=True, recording_id="drone_racing")
-# rr.init("trajectory_animation", spawn=True)
+# rr.init("trajectory_animation",  spawn=True, recording_id="drone_racing")
+# # rr.init("trajectory_animation", spawn=True)
 
-drone_urdf_path = "./visualization/rerun/drone.urdf"
-urdf_logger = URDFLogger(drone_urdf_path, None)
+# drone_urdf_path = "./visualization/rerun/drone.urdf"
+# urdf_logger = URDFLogger(drone_urdf_path, None)
 
-urdf_logger.entity_path_prefix = f"solution/drone_urdf"
-urdf_logger.log()
+# urdf_logger.entity_path_prefix = f"solution/drone_urdf"
+# urdf_logger.log()
 
-for step in range(N):
+# for step in range(N):
 
-    rr.set_time_seconds( "sim_time", dt * step )
+#     rr.set_time_seconds( "sim_time", dt * step )
 
-    rr.log(
-        f"solution_drone/position",
-        rr.Points3D(
-            final_positions[step] #,
-            # colors=vel_mapped_color,
-        ),
-    )
+#     rr.log(
+#         f"solution_drone/position",
+#         rr.Points3D(
+#             final_positions[step] #,
+#             # colors=vel_mapped_color,
+#         ),
+#     )
 
-    rr.log(
-        f"solution_drone/drone_urdf",
-        rr.Transform3D(
-            translation=final_positions[step],
-            rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
-            axis_length=1.0,
-        ),
-    )
+#     rr.log(
+#         f"solution_drone/drone_urdf",
+#         rr.Transform3D(
+#             translation=final_positions[step],
+#             rotation=rr.Quaternion(xyzw=q_quat_ilqr[step]),
+#             axis_length=1.0,
+#         ),
+#     )
 
-print("Rerun logging finished")
+# print("Rerun logging finished")
 
 
 # =====================================================
@@ -221,6 +260,7 @@ plt.subplot(211)
 plt.plot(J_hist_ilqr, label='ilqr')
 plt.title('Cost Comparison')
 plt.ylabel('Cost')
+plt.yscale('log')
 plt.legend()
 plt.grid()
 plt.subplot(212)
@@ -228,6 +268,7 @@ plt.plot(grad_hist_ilqr, label='ilqr')
 plt.title('Gradient Comparison')
 plt.xlabel('Iteration')
 plt.ylabel('Gradient')
+plt.yscale('log')
 plt.legend()
 plt.grid()
 

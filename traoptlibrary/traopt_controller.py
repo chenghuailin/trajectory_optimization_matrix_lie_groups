@@ -2391,9 +2391,9 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         self._defect_mu0 = 10.
         self._defect_rho = 0.5
-        self._defect_gamma = 0.05
+        self._defect_gamma = 0.05 # used to be 0.05
         self._defect_mu_min = self._defect_mu0
-        self._defect_kappa = 1e-14
+        self._defect_kappa = 1e-12
 
         self._k = np.zeros((N, self._action_size))
         self._K = np.zeros((N, self._action_size, self._state_size))
@@ -2473,8 +2473,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
         xs_hist.append(xs.copy())
         us_hist.append(us.copy())
 
-        if self._line_search:
-            d_weight_prev = self._defect_mu0
+        # if self._line_search:
+        d_weight_prev = self._defect_mu0
 
         for iteration in range(n_iterations):
             accepted = False
@@ -2528,6 +2528,9 @@ class iLQR_Tracking_SE3_MS(BaseController):
                 # )
                 # d_weight = self._update_defect_weight( exact_lqr_cost_change, d_norm)
                 # merit = J_opt + d_weight * d_norm
+
+                # if iteration > 9:
+                #     self._line_search = True
 
                 if self._line_search:
                     _, _, xs_errs, us_errs = self._rollout(xs, us, k, K, d, F_x, F_u, rollout="linear")
@@ -2763,6 +2766,8 @@ class iLQR_Tracking_SE3_MS(BaseController):
 
         defect_weight = self._defect_mu0 \
             + np.abs(expected_cost_change[0]+0.5*expected_cost_change[1]) / ( (1 - self._defect_rho) * d_norm )
+        # defect_weight = self._defect_mu0 \
+        #     + (expected_cost_change[0]+0.5*expected_cost_change[1]) / ( (1 - self._defect_rho) * d_norm )
         
         defect_weight = max( self._defect_mu_min, defect_weight )
 

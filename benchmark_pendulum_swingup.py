@@ -115,20 +115,20 @@ ilqr_ss_so3 = iLQR_Tracking_SO3(    dynamics, cost, N,
                                     hessians=HESSIANS,
                                     rollout='nonlinear' )
 
-xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
-    grad_hist_ms_so3, defect_hist_ms_so3= \
-        ilqr_ms_so3.fit(x0_mnf, us_init, 
-                        n_iterations=max_iterations, 
-                        tol_grad_norm=tol_gradiant_converge,
-                        on_iteration=on_iteration_ms_so3)
-xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
+# xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
+#     grad_hist_ms_so3, defect_hist_ms_so3= \
+#         ilqr_ms_so3.fit(x0_mnf, us_init, 
+#                         n_iterations=max_iterations, 
+#                         tol_grad_norm=tol_gradiant_converge,
+#                         on_iteration=on_iteration_ms_so3)
+# xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
 
-xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
-        ilqr_ss_so3.fit(x0_mnf, us_init, 
-                        n_iterations=max_iterations, 
-                        tol_grad_norm=tol_gradiant_converge,
-                        on_iteration=on_iteration_ss_so3)
-xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
+# xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
+#         ilqr_ss_so3.fit(x0_mnf, us_init, 
+#                         n_iterations=max_iterations, 
+#                         tol_grad_norm=tol_gradiant_converge,
+#                         on_iteration=on_iteration_ss_so3)
+# xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
 
 
 # =====================================================
@@ -145,27 +145,28 @@ ipopt_unconstr_euc = EmbeddedEuclideanSO3_Pendulum3D_MatrixNorm(  q_ref, xi_ref,
 # ipopt_unconstr_euc = EmbeddedEuclideanSO3( q_ref, xi_ref, dt, J, Q, R )
 # ipopt_unconstr_euc = EmbeddedEuclideanSO3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R )
 
-# get the solution
-xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
-    grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
-        ipopt_unconstr_euc.fit( x0_np, us_init, 
-                                n_iterations=max_iterations,
-                                tol_norm=tol_converge )
+# # get the solution
+# xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
+#     grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
+#         ipopt_unconstr_euc.fit( x0_np, us_init, 
+#                                 n_iterations=max_iterations,
+#                                 tol_norm=tol_converge )
 
 # =====================================================
 # Constraint Stabilization Method
 # =====================================================
+kappa = 1e0
 
 # intialize the embedded method
 ipopt_constr_euc = ConstraintStabilizationSO3_Pendulum3D_MatrixNorm(q_ref, xi_ref, dt, J, m, 
-                                                                    length, Q, R, eps_init )
+                                                                    length, Q, R, eps_init, kappa )
 
-# get the solution
-xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
-    grad_hist_constr_euc, defect_hist_constr_euc = \
-        ipopt_constr_euc.fit(   x0_np, us_init, 
-                                n_iterations=max_iterations,
-                                tol_norm=tol_converge )
+# # get the solution
+# xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
+#     grad_hist_constr_euc, defect_hist_constr_euc = \
+#         ipopt_constr_euc.fit(   x0_np, us_init, 
+#                                 n_iterations=max_iterations,
+#                                 tol_norm=tol_converge )
 
 
 # =====================================================
@@ -181,6 +182,8 @@ def save_results_pickle(filename,
         'prob':{
             'J': J,
             'dt': dt,
+            'm': m,
+            'length': length,
             'q_ref': q_ref,
             'xi_ref': xi_ref,
             'x0': x0_np,
@@ -221,51 +224,51 @@ def save_results_pickle(filename,
         pickle.dump(data, f)
     print(f"Results saved to {filename}")
 
-if SAVE_RESULTS:
-    save_results_pickle(SAVE_RESULTS_DIR,
-                       xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
-                       xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
-                       xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
-                       xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc)
+# if SAVE_RESULTS:
+#     save_results_pickle(SAVE_RESULTS_DIR,
+#                        xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
+#                        xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
+#                        xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
+#                        xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc)
 
 
 # =====================================================
 # Load Results
 # =====================================================
 
-# def load_results_pickle(filename):
-#     with open(filename, 'rb') as f:
-#         data = pickle.load(f)
-#     return data
+def load_results_pickle(filename):
+    with open(filename, 'rb') as f:
+        data = pickle.load(f)
+    return data
 
-# results = load_results_pickle(SAVE_RESULTS_DIR)
+results = load_results_pickle(SAVE_RESULTS_DIR)
 
-# ms_so3_data = results['ms_so3']
-# xs_ms_so3 = ms_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-# us_ms_so3 = ms_so3_data['us']            # 控制序列 (numpy 数组)
-# J_hist_ms_so3 = ms_so3_data['J_hist']    # 目标函数历史 (列表)
-# grad_hist_ms_so3 = ms_so3_data['grad_hist']  # 梯度范数历史 (列表)
-# defect_hist_ms_so3 = ms_so3_data['defect_hist']  # 缺陷范数历史 (列表)
+ms_so3_data = results['ms_so3']
+xs_ms_so3 = ms_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+us_ms_so3 = ms_so3_data['us']            # 控制序列 (numpy 数组)
+J_hist_ms_so3 = ms_so3_data['J_hist']    # 目标函数历史 (列表)
+grad_hist_ms_so3 = ms_so3_data['grad_hist']  # 梯度范数历史 (列表)
+defect_hist_ms_so3 = ms_so3_data['defect_hist']  # 缺陷范数历史 (列表)
 
-# ss_so3_data = results['ss_so3']
-# xs_ss_so3 = ss_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-# us_ss_so3 = ss_so3_data['us']            # 控制序列 (numpy 数组)
-# J_hist_ss_so3 = ss_so3_data['J_hist']    # 目标函数历史 (列表)
-# grad_hist_ss_so3 = ss_so3_data['grad_hist']  # 梯度范数历史 (列表)
+ss_so3_data = results['ss_so3']
+xs_ss_so3 = ss_so3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+us_ss_so3 = ss_so3_data['us']            # 控制序列 (numpy 数组)
+J_hist_ss_so3 = ss_so3_data['J_hist']    # 目标函数历史 (列表)
+grad_hist_ss_so3 = ss_so3_data['grad_hist']  # 梯度范数历史 (列表)
 
-# unconstr_euc_data = results['unconstr_euc']
-# xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
-# us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
-# J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
-# grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
-# defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
+unconstr_euc_data = results['unconstr_euc']
+xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
+us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
+J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
 
-# constr_euc_data = results['constr_euc']
-# xs_constr_euc = constr_euc_data['xs']                      # 状态序列 (numpy 数组)
-# us_constr_euc = constr_euc_data['us']                      # 控制序列 (numpy 数组)
-# J_hist_constr_euc = constr_euc_data['J_hist']              # 目标函数历史 (numpy 数组)
-# grad_hist_constr_euc = constr_euc_data['grad_hist']        # 梯度范数历史 (numpy 数组)
-# defect_hist_constr_euc = constr_euc_data['defect_hist']    # 缺陷范数历史 (numpy 数组)
+constr_euc_data = results['constr_euc']
+xs_constr_euc = constr_euc_data['xs']                      # 状态序列 (numpy 数组)
+us_constr_euc = constr_euc_data['us']                      # 控制序列 (numpy 数组)
+J_hist_constr_euc = constr_euc_data['J_hist']              # 目标函数历史 (numpy 数组)
+grad_hist_constr_euc = constr_euc_data['grad_hist']        # 梯度范数历史 (numpy 数组)
+defect_hist_constr_euc = constr_euc_data['defect_hist']    # 缺陷范数历史 (numpy 数组)
 
 
 # =====================================================
@@ -304,7 +307,7 @@ violation_det_unconstr_euc = [ 1 - np.linalg.det(x[0]) for x in xs_unconstr_euc 
 violation_det_constr_euc  = [ 1 - np.linalg.det(x[0]) for x in xs_constr_euc ]
 
 plt.figure()
-ax = plt.subplot(121)
+ax = plt.subplot(131)
 plt.plot( violation_orth_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_orth_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_orth_unconstr_euc, label='Embedded Unconstrained' )
@@ -315,7 +318,7 @@ plt.xlabel('Stage')
 plt.legend()
 plt.grid()
 
-ax = plt.subplot(122)
+ax = plt.subplot(132)
 plt.plot( violation_det_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_det_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_det_unconstr_euc, label='Embedded Unconstrained' )
@@ -334,24 +337,24 @@ dyn_error_ss_so3 = [ err_dyn( xs_ss_so3[k], xs_ss_so3[k+1] )  for k in range(Nsi
 dyn_error_unconstr_euc = [ err_dyn( xs_unconstr_euc[k], xs_unconstr_euc[k+1] )  for k in range(Nsim) ]
 dyn_error_constr_euc = [ err_dyn( xs_constr_euc[k], xs_constr_euc[k+1] )  for k in range(Nsim) ]
 
-plt.figure()
+ax = plt.subplot(133)
 plt.plot( dyn_error_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( dyn_error_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( dyn_error_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( dyn_error_constr_euc, label='Embedded Stabilization' )
 plt.yscale('log')
 plt.ylabel(r'$||\mathcal{X}_{k+1} - F_\mathcal{X}( \mathcal{X}_k, \xi_k )||$')
-plt.xlabel('Iteration')
-plt.legend()
+plt.xlabel('Stage')
+# plt.legend()
 plt.grid()
 
 # 3. cost comparison
 
 plt.figure()
-plt.plot( J_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
-plt.plot( J_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( J_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( J_hist_constr_euc, label='Embedded Stabilization' )
+plt.plot( J_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
+plt.plot( J_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel(r'$J(\mathbf{x},\mathbf{u})$')
 plt.xlabel('Iteration')
@@ -359,35 +362,35 @@ plt.legend()
 plt.grid()
 
 plt.figure()
-plt.plot( np.abs(J_hist_ms_so3[1:]-J_hist_ms_so3[:-1]), label=r'MS-iLQR on $\mathcal{M}$' )
-plt.plot( np.abs(J_hist_ss_so3[1:]-J_hist_ss_so3[:-1]), label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( np.abs(J_hist_unconstr_euc[1:]-J_hist_unconstr_euc[:-1]), label='Embedded Unconstrained' )
 plt.plot( np.abs(J_hist_constr_euc[1:]-J_hist_constr_euc[:-1]), label='Embedded Stabilization' )
+plt.plot( np.abs(J_hist_ms_so3[1:]-J_hist_ms_so3[:-1]), label=r'MS-iLQR on $\mathcal{M}$' )
+plt.plot( np.abs(J_hist_ss_so3[1:]-J_hist_ss_so3[:-1]), label=r'SS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel(r'$|\Delta J(\mathbf{x},\mathbf{u})$|')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 plt.figure()
-plt.plot( grad_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
-plt.plot( grad_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( grad_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( grad_hist_constr_euc, label='Embedded Stabilization' )
+plt.plot( grad_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
+plt.plot( grad_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel('Gradiant')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 plt.figure()
-plt.plot( defect_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( defect_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( defect_hist_constr_euc, label='Embedded Stabilization' )
+plt.plot( defect_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel(r'$||d||$')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 # 4. Big Plotting: State, Input
@@ -517,59 +520,77 @@ pos_rod_ss_so3 = np.array([x[0] @ updown_vector for x in xs_ss_so3]).reshape(N+1
 pos_rod_unconstr_euc = np.array([x[0] @ updown_vector for x in xs_unconstr_euc]).reshape(N+1, 3)
 pos_rod_constr_euc = np.array([x[0] @ updown_vector for x in xs_constr_euc]).reshape(N+1, 3)
 
-pos_rod_ref = np.array([x @ updown_vector for x in q_ref]).reshape(N+1, 3)
+pos_rod_ref = np.array([q_ref[0] @ updown_vector]).reshape(3,)
+pos_rod_init = pos_rod_ms_so3[0]
 
-# fig = plt.figure()
-# ax = fig.add_subplot(111, projection='3d')
-# ax.plot(pos_rod_ms_so3[:, 0], pos_rod_ms_so3[:, 1], pos_rod_ms_so3[:, 2],
-#             label=r'MS-iLQR on $\mathcal{M}$')
-# ax.plot(pos_rod_ss_so3[:, 0], pos_rod_ss_so3[:, 1], pos_rod_ss_so3[:, 2],
-#             label=r'SS-iLQR on $\mathcal{M}$')
-# ax.plot(pos_rod_unconstr_euc[:, 0], pos_rod_unconstr_euc[:, 1], pos_rod_unconstr_euc[:, 2],
-#             label='Embedded Unconstrained')
-# ax.plot(pos_rod_constr_euc[:, 0], pos_rod_constr_euc[:, 1], pos_rod_constr_euc[:, 2],
-#             label='Embedded Stabilization')
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(pos_rod_ms_so3[:, 0], pos_rod_ms_so3[:, 1], pos_rod_ms_so3[:, 2],
+            label=r'MS-iLQR on $\mathcal{M}$')
+ax.plot(pos_rod_ss_so3[:, 0], pos_rod_ss_so3[:, 1], pos_rod_ss_so3[:, 2],
+            label=r'SS-iLQR on $\mathcal{M}$')
+ax.plot(pos_rod_unconstr_euc[:, 0], pos_rod_unconstr_euc[:, 1], pos_rod_unconstr_euc[:, 2],
+            label='Embedded Unconstrained')
+ax.plot(pos_rod_constr_euc[:, 0], pos_rod_constr_euc[:, 1], pos_rod_constr_euc[:, 2],
+            label='Embedded Stabilization')
 # ax.plot(pos_rod_ref[:, 0], pos_rod_ref[:, 1], pos_rod_ref[:, 2],
 #             label='Reference')
-# plt.legend()
+ax.quiver( 0, 0, 0, pos_rod_init[0], pos_rod_init[1], pos_rod_init[2], color='blue', label=r'$R_0$' )
+ax.quiver( 0, 0, 0, pos_rod_ref[0], pos_rod_ref[1], pos_rod_ref[2], color='red', label=r'$R_\text{ref}$' )
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_zlabel('z')
+plt.legend()
 
 fig = plt.figure()
 ax = fig.add_subplot(221, projection='3d')
 ax.set_title(r'MS-iLQR on $\mathcal{M}$')
-ax.plot(pos_rod_ms_so3[:, 0], pos_rod_ms_so3[:, 1], pos_rod_ms_so3[:, 2])
-ax.plot(pos_rod_ref[:, 0], pos_rod_ref[:, 1], pos_rod_ref[:, 2])
-ax.set_zlim(-1, 1)
+ax.plot(pos_rod_ms_so3[:, 0], pos_rod_ms_so3[:, 1], pos_rod_ms_so3[:, 2], label=r'$R$')
+ax.quiver( 0, 0, 0, pos_rod_init[0], pos_rod_init[1], pos_rod_init[2], color='blue', label=r'$R_0$' )
+ax.quiver( 0, 0, 0, pos_rod_ref[0], pos_rod_ref[1], pos_rod_ref[2], color='red', label=r'$R_\text{ref}$' )
+ax.set_xlim(-pendulum_length, pendulum_length)
+ax.set_ylim(-pendulum_length, pendulum_length)
+ax.set_zlim(-pendulum_length, pendulum_length)
 ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.set_zlabel('z')
-plt.legend([r'$\mathcal{X}$',r'$\mathcal{X}_\text{ref}$'])
+plt.legend()
 
 ax = fig.add_subplot(222, projection='3d')
 ax.set_title(r'SS-iLQR on $\mathcal{M}$')
 ax.plot(pos_rod_ss_so3[:, 0], pos_rod_ss_so3[:, 1], pos_rod_ss_so3[:, 2])
-ax.plot(pos_rod_ref[:, 0], pos_rod_ref[:, 1], pos_rod_ref[:, 2])
+ax.quiver( 0, 0, 0, pos_rod_init[0], pos_rod_init[1], pos_rod_init[2], color='blue', label=r'$R_0$' )
+ax.quiver( 0, 0, 0, pos_rod_ref[0], pos_rod_ref[1], pos_rod_ref[2], color='red', label=r'$R_\text{ref}$' )
 ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.set_zlabel('z')
-ax.set_zlim(-1, 1)
+ax.set_xlim(-pendulum_length, pendulum_length)
+ax.set_ylim(-pendulum_length, pendulum_length)
+ax.set_zlim(-pendulum_length, pendulum_length)
 
 ax = fig.add_subplot(223, projection='3d')
 ax.set_title('Embedded Unconstrained')
 ax.plot(pos_rod_unconstr_euc[:, 0], pos_rod_unconstr_euc[:, 1], pos_rod_unconstr_euc[:, 2])
-ax.plot(pos_rod_ref[:, 0], pos_rod_ref[:, 1], pos_rod_ref[:, 2])
+ax.quiver( 0, 0, 0, pos_rod_init[0], pos_rod_init[1], pos_rod_init[2], color='blue', label=r'$R_0$' )
+ax.quiver( 0, 0, 0, pos_rod_ref[0], pos_rod_ref[1], pos_rod_ref[2], color='red', label=r'$R_\text{ref}$' )
 ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.set_zlabel('z')
-ax.set_zlim(-1, 1)
+ax.set_xlim(-pendulum_length, pendulum_length)
+ax.set_ylim(-pendulum_length, pendulum_length)
+ax.set_zlim(-pendulum_length, pendulum_length)
 
 ax = fig.add_subplot(224, projection='3d')
 ax.set_title('Embedded Stabilization')
 ax.plot(pos_rod_constr_euc[:, 0], pos_rod_constr_euc[:, 1], pos_rod_constr_euc[:, 2])
-ax.plot(pos_rod_ref[:, 0], pos_rod_ref[:, 1], pos_rod_ref[:, 2])
+ax.quiver( 0, 0, 0, pos_rod_init[0], pos_rod_init[1], pos_rod_init[2], color='blue', label=r'$R_0$' )
+ax.quiver( 0, 0, 0, pos_rod_ref[0], pos_rod_ref[1], pos_rod_ref[2], color='red', label=r'$R_\text{ref}$' )
 ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.set_zlabel('z')
-ax.set_zlim(-1, 1)
+ax.set_xlim(-pendulum_length, pendulum_length)
+ax.set_ylim(-pendulum_length, pendulum_length)
+ax.set_zlim(-pendulum_length, pendulum_length)
 
 # =====================================================
 # Special Problem

@@ -1254,7 +1254,7 @@ class DroneDynamics(BaseDynamics):
         self._Pu[5,3] = 1.
         
         self._Bt = np.vstack(
-            (np.zeros((self.error_state_size, self.action_size)),self.Jinv @ self.Pu )
+            (np.zeros((self.error_state_size, self.action_size)), self.Jinv @ self.Pu )
         )
 
         self._integration_method = integration_method
@@ -1356,13 +1356,17 @@ class DroneDynamics(BaseDynamics):
         xi = xi.reshape(self.vel_state_size, 1)
         u = u.reshape(self.action_size, 1)
 
-        down_vec = np.array([0,0,-1.])
+        down_vec = np.array([0,0,-1.]).reshape(3,1)
         g_acc = self.m * self.g * q_mnf.inverse().rotation() @ down_vec
         g_acc = np.concatenate( (np.zeros((3,1)), g_acc ) )
 
         # TODO: decide if rewriting into manif or reordering xi is needed
         q_dot = q @ scipy.linalg.expm( se3_hat(xi))
-        xi_dot =  self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + g_acc + self.Pu @ u )
+        # xi_dot =  self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + g_acc + self.Pu @ u )
+        try:
+            xi_dot =  self.Jinv @ ( coadjoint( xi ) @ self.J @ xi + g_acc + self.Pu @ u )
+        except:
+            pass
         
         return [q_dot, xi_dot.reshape(self.vel_state_size,)]
     
@@ -1425,7 +1429,7 @@ class DroneDynamics(BaseDynamics):
         omega = xi[:3]
         v = xi[3:]
 
-        down_vec = np.array([0,0,-1.])
+        down_vec = np.array([0,0,-1.]).reshape(3,1)
 
         q = SE32manifSE3( q )
         xi = se32manifse3( xi )

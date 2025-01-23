@@ -11,7 +11,7 @@ from traoptlibrary.traopt_baseline import EmbeddedEuclideanSO3, ConstraintStabil
 from scipy.spatial.transform import Rotation
 from manifpy import SO3, SO3Tangent
 
-SAVE_RESULTS = False
+SAVE_RESULTS = True
 SAVE_RESULTS_DIR = 'visualization/results_benchmark/results_so3_tracking_benchmark.pkl'
 
 # =====================================================
@@ -63,7 +63,7 @@ print("Horizon of dataset is", Nsim)
 q0 = SO3( 
     Rotation.from_euler('zxy', [90.,10.,45.], degrees=True).as_quat() 
 ) 
-omega0 = 1.7 * 1e-1
+omega0 = 1.7 * 1e-1 
 xi0 = SO3Tangent( np.ones((3,1)) * omega0 )
 x0_mnf = [ q0, xi0 ]
 x0_np = [ q0.rotation(), xi0.coeffs() ]
@@ -102,7 +102,7 @@ dynamics = SO3Dynamics( J, dt, hessians=HESSIANS )
 
 Q = np.diag([10., 10., 10., 1., 1., 1.,])
 P = Q * 10
-R = np.identity(3) * 1e-1 * 2
+R = np.identity(3) * 1e-3 # 就这个了！
 cost = SO3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref )
 
 us_init = np.zeros((N, action_size,))
@@ -117,20 +117,20 @@ ilqr_ss_so3 = iLQR_Tracking_SO3(    dynamics, cost, N,
                                     hessians=HESSIANS,
                                     rollout='nonlinear' )
 
-xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
-    grad_hist_ms_so3, defect_hist_ms_so3= \
-        ilqr_ms_so3.fit(x0_mnf, us_init, 
-                        n_iterations=max_iterations, 
-                        tol_grad_norm=tol_gradiant_converge,
-                        on_iteration=on_iteration_ms_so3)
-xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
+# xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
+#     grad_hist_ms_so3, defect_hist_ms_so3= \
+#         ilqr_ms_so3.fit(x0_mnf, us_init, 
+#                         n_iterations=max_iterations, 
+#                         tol_grad_norm=tol_gradiant_converge,
+#                         on_iteration=on_iteration_ms_so3)
+# xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
 
-xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
-        ilqr_ss_so3.fit(x0_mnf, us_init, 
-                        n_iterations=max_iterations, 
-                        tol_grad_norm=tol_gradiant_converge,
-                        on_iteration=on_iteration_ss_so3)
-xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
+# xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
+#         ilqr_ss_so3.fit(x0_mnf, us_init, 
+#                         n_iterations=max_iterations, 
+#                         tol_grad_norm=tol_gradiant_converge,
+#                         on_iteration=on_iteration_ss_so3)
+# xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
 
 # =====================================================
 # Unconstrained Embedded Space Method with Log Cost
@@ -139,12 +139,12 @@ xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
 # intialize the embedded method
 ipopt_logcost_euc = EmbeddedEuclideanSO3( q_ref, xi_ref, dt, J, Q, R )
 
-# get the solution
-xs_logcost_euc , us_logcost_euc , J_hist_logcost_euc , \
-    grad_hist_logcost_euc , defect_hist_logcost_euc = \
-        ipopt_logcost_euc.fit(  x0_np, us_init, 
-                                n_iterations=max_iterations,
-                                tol_norm=tol_converge )
+# # get the solution
+# xs_logcost_euc , us_logcost_euc , J_hist_logcost_euc , \
+#     grad_hist_logcost_euc , defect_hist_logcost_euc = \
+#         ipopt_logcost_euc.fit(  x0_np, us_init, 
+#                                 n_iterations=max_iterations,
+#                                 tol_norm=tol_converge )
 
 # =====================================================
 # Unconstrained Embedded Space Method
@@ -153,12 +153,12 @@ xs_logcost_euc , us_logcost_euc , J_hist_logcost_euc , \
 # intialize the embedded method
 ipopt_unconstr_euc = EmbeddedEuclideanSO3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R )
 
-# get the solution
-xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
-    grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
-        ipopt_unconstr_euc.fit( x0_np, us_init, 
-                                n_iterations=max_iterations,
-                                tol_norm=tol_converge )
+# # get the solution
+# xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
+#     grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
+#         ipopt_unconstr_euc.fit( x0_np, us_init, 
+#                                 n_iterations=max_iterations,
+#                                 tol_norm=tol_converge )
 
 # =====================================================
 # Constraint Stabilization Method
@@ -167,12 +167,12 @@ xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
 # intialize the embedded method
 ipopt_constr_euc = ConstraintStabilizationSO3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R )
 
-# get the solution
-xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
-    grad_hist_constr_euc, defect_hist_constr_euc = \
-        ipopt_constr_euc.fit(   x0_np, us_init, 
-                                n_iterations=max_iterations,
-                                tol_norm=tol_converge )
+# # get the solution
+# xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
+#     grad_hist_constr_euc, defect_hist_constr_euc = \
+#         ipopt_constr_euc.fit(   x0_np, us_init, 
+#                                 n_iterations=max_iterations,
+#                                 tol_norm=tol_converge )
 
 # =====================================================
 # Save Results
@@ -181,6 +181,7 @@ xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
 def save_results_pickle(filename,
                        xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
                        xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
+                       xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, grad_hist_logcost_euc, defect_hist_unconstr_euc,
                        xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
                        xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc):
     data = {
@@ -235,11 +236,12 @@ def save_results_pickle(filename,
     print(f"Results saved to {filename}")
 
 if SAVE_RESULTS:
-    save_results_pickle(SAVE_RESULTS_DIR,
-                       xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
-                       xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
-                       xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
-                       xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc)
+    # save_results_pickle(SAVE_RESULTS_DIR,
+    #                    xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
+    #                    xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
+    #                    xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, grad_hist_logcost_euc, defect_hist_unconstr_euc,
+    #                    xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
+    #                    xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc)
 
 
 # =====================================================
@@ -323,7 +325,7 @@ violation_det_unconstr_euc = [ 1 - np.linalg.det(x[0]) for x in xs_unconstr_euc 
 violation_det_constr_euc  = [ 1 - np.linalg.det(x[0]) for x in xs_constr_euc ]
 
 plt.figure()
-ax = plt.subplot(121)
+ax = plt.subplot(131)
 plt.plot( violation_orth_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_orth_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_orth_unconstr_euc, label='Embedded Unconstrained' )
@@ -335,7 +337,7 @@ plt.xlabel('Stage')
 plt.legend()
 plt.grid()
 
-ax = plt.subplot(122)
+ax = plt.subplot(132)
 plt.plot( violation_det_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_det_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_det_unconstr_euc, label='Embedded Unconstrained' )
@@ -356,7 +358,7 @@ dyn_error_unconstr_euc = [ err_dyn( xs_unconstr_euc[k], xs_unconstr_euc[k+1] )  
 dyn_error_constr_euc = [ err_dyn( xs_constr_euc[k], xs_constr_euc[k+1] )  for k in range(Nsim) ]
 dyn_error_logcost_euc = [ err_dyn( xs_logcost_euc[k], xs_logcost_euc[k+1] )  for k in range(Nsim) ]
 
-plt.figure()
+ax = plt.subplot(133)
 plt.plot( dyn_error_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( dyn_error_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( dyn_error_unconstr_euc, label='Embedded Unconstrained' )
@@ -364,18 +366,18 @@ plt.plot( dyn_error_constr_euc, label='Embedded Stabilization' )
 plt.plot( dyn_error_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
 plt.yscale('log')
 plt.ylabel(r'$||\mathcal{X}_{k+1} - F_\mathcal{X}( \mathcal{X}_k, \xi_k )||$')
-plt.xlabel('Iteration')
-plt.legend()
+plt.xlabel('Stage')
+# plt.legend()
 plt.grid()
 
 # 3. cost comparison
 
 plt.figure()
-plt.plot( J_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
-plt.plot( J_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( J_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( J_hist_constr_euc, label='Embedded Stabilization' )
 plt.plot( J_hist_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
+plt.plot( J_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
+plt.plot( J_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel(r'$J(\mathbf{x},\mathbf{u})$')
 plt.xlabel('Iteration')
@@ -383,38 +385,38 @@ plt.legend()
 plt.grid()
 
 plt.figure()
-plt.plot( np.abs(J_hist_ms_so3[1:]-J_hist_ms_so3[:-1]), label=r'MS-iLQR on $\mathcal{M}$' )
-plt.plot( np.abs(J_hist_ss_so3[1:]-J_hist_ss_so3[:-1]), label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( np.abs(J_hist_unconstr_euc[1:]-J_hist_unconstr_euc[:-1]), label='Embedded Unconstrained' )
 plt.plot( np.abs(J_hist_constr_euc[1:]-J_hist_constr_euc[:-1]), label='Embedded Stabilization' )
 plt.plot( np.abs(J_hist_logcost_euc[1:]-J_hist_logcost_euc[:-1]), label=r'Embedded w. $\mathcal{M}$ Cost'  )
+plt.plot( np.abs(J_hist_ms_so3[1:]-J_hist_ms_so3[:-1]), label=r'MS-iLQR on $\mathcal{M}$' )
+plt.plot( np.abs(J_hist_ss_so3[1:]-J_hist_ss_so3[:-1]), label=r'SS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel(r'$|\Delta J(\mathbf{x},\mathbf{u})$|')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 plt.figure()
-plt.plot( grad_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
-plt.plot( grad_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.plot( grad_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( grad_hist_constr_euc, label='Embedded Stabilization' )
 plt.plot( grad_hist_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
+plt.plot( grad_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
+plt.plot( grad_hist_ss_so3, label=r'SS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel('Gradiant')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 plt.figure()
-plt.plot( defect_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( defect_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.plot( defect_hist_constr_euc, label='Embedded Stabilization' )
 plt.plot( defect_hist_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
+plt.plot( defect_hist_ms_so3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel(r'$||d||$')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 # 4. Big Plotting: State, Input
@@ -456,6 +458,7 @@ for j in range( action_size ):
     plt.plot( us_ms_so3[:,j])
 plt.tick_params(axis='x', labelbottom=False)
 plt.ylabel('input')
+# plt.ylim([-30,15])
 plt.legend([r'$u_x$',r'$u_y$',r'$u_z$'])
 plt.grid()
 
@@ -482,6 +485,7 @@ for j in range( action_size ):
     plt.plot( us_ss_so3[:,j])
 plt.tick_params(axis='x', labelbottom=False)
 plt.ylabel('input')
+# plt.ylim([-30,15])
 # plt.legend([r'$u_x$',r'$u_y$',r'$u_z$'])
 plt.grid()
 
@@ -507,6 +511,7 @@ for j in range( action_size ):
     plt.plot( us_unconstr_euc[:,j])
 plt.tick_params(axis='x', labelbottom=False)
 plt.ylabel('input')
+# plt.ylim([-30,15])
 # plt.legend([r'$u_x$',r'$u_y$',r'$u_z$'])
 plt.grid()
 
@@ -531,6 +536,7 @@ plt.subplot(5,3,12)
 for j in range( action_size ):
     plt.plot( us_constr_euc[:,j])
 plt.ylabel('input')
+# plt.ylim([-30,15])
 plt.tick_params(axis='x', labelbottom=False)
 # plt.legend([r'$u_x$',r'$u_y$',r'$u_z$'])
 plt.grid()
@@ -558,6 +564,7 @@ for j in range( action_size ):
 plt.ylabel('input')
 plt.xlabel('Stage')
 # plt.legend([r'$u_x$',r'$u_y$',r'$u_z$'])
+# plt.ylim([-30,15])
 plt.grid()
 
 

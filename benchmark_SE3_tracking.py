@@ -11,7 +11,7 @@ from traoptlibrary.traopt_baseline import EmbeddedEuclideanSE3, ConstraintStabil
 from scipy.spatial.transform import Rotation
 from manifpy import SE3, SE3Tangent
 
-SAVE_RESULTS = True
+SAVE_RESULTS = False
 SAVE_RESULTS_DIR = 'visualization/results_benchmark/results_se3_tracking_benchmark.pkl'
 
 # =====================================================
@@ -59,7 +59,7 @@ Nsim = q_ref.shape[0] - 1
 # q_ref = q_ref[:Nsim+1]
 # xi_ref = xi_ref[:Nsim+1]
 
-print("Horizon of dataset is", Nsim)
+
 
 q0 = SE3(
     position = -1 * np.ones((3,)) + q_ref[0][:3,3],
@@ -75,11 +75,16 @@ J = np.block([
     [np.zeros((3, 3)), m * np.identity(3)]
 ])
 
+# Nsim = 200
+# q_ref = q_ref[:Nsim+1]
+# xi_ref = xi_ref[:Nsim+1]
+
 max_iterations = 200
 
 tol_gradiant_converge = 1e-12
 tol_converge = tol_gradiant_converge
 
+print("Horizon of dataset is", Nsim)
 # =====================================================
 # Helper Function
 # =====================================================
@@ -110,7 +115,7 @@ Q = np.diag([
     1., 1., 1., 1., 1., 1. 
 ]) 
 P = Q * 10
-R = np.identity(6) * 1e-3
+R = np.identity(6) * 1e-4
 cost = SE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref )
 
 us_init = np.zeros((N, action_size,))
@@ -142,11 +147,33 @@ ilqr_ss_se3 = iLQR_Tracking_SE3(    dynamics, cost, N,
 # Embedded Euclidean Unconstrained Method
 # =====================================================
 eps_init = 1e-3
-# 1e-3
+# kappa = 1e-2
+# when eps_init kept as 1e-3, neither kappa=1e0 or 1e-5 works for mumps solver
 
+# # intialize the embedded method
+ipopt_logcost_euc = EmbeddedEuclideanSE3(   q_ref, xi_ref, dt, J, Q, R, 
+                                            eps_init=eps_init )
+
+# ipopt_constr_euc = ConstraintStabilizationSE3( q_ref, xi_ref, dt, J, Q, R, 
+#                                               eps_init=eps_init, 
+#                                               kappa=kappa )
+# ipopt_constr_euc = ConstraintStabilizationSE3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R, 
+#                                               eps_init=eps_init, 
+#                                               kappa=kappa )
+
+# # get the solution
+# xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, \
+#     grad_hist_logcost_euc, defect_hist_logcost_euc = \
+#         ipopt_logcost_euc.fit(   x0, us_init, 
+#                                 n_iterations=max_iterations,
+#                                 tol_norm=tol_converge )
+
+# =====================================================
+# Embedded Euclidean Unconstrained Method with Manifold Cost
+# =====================================================
 # intialize the embedded method
-ipopt_unconstr_euc = EmbeddedEuclideanSE3( q_ref, xi_ref, dt, J, Q, R, 
-                                          eps_init=eps_init )
+ipopt_unconstr_euc = EmbeddedEuclideanSE3_MatrixNorm(   q_ref, xi_ref, dt, J, Q, R, 
+                                                        eps_init=eps_init )
 
 # # get the solution
 # xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
@@ -155,30 +182,6 @@ ipopt_unconstr_euc = EmbeddedEuclideanSE3( q_ref, xi_ref, dt, J, Q, R,
 #                                 n_iterations=max_iterations,
 #                                 tol_norm=tol_converge )
 
-# =====================================================
-# Constraint Stabilization Method
-# =====================================================
-kappa = 1e-2
-# when eps_init kept as 1e-3, neither kappa=1e0 or 1e-5 works for mumps solver
-
-# # intialize the embedded method
-# ipopt_constr_euc = ConstraintStabilizationSE3( q_ref, xi_ref, dt, J, Q, R, 
-#                                               eps_init=eps_init, 
-#                                               kappa=kappa )
-
-# ipopt_constr_euc = ConstraintStabilizationSE3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R, 
-#                                               eps_init=eps_init, 
-#                                               kappa=kappa )
-
-# ipopt_constr_euc = EmbeddedEuclideanSE3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R, 
-#                                           eps_init=eps_init )
-
-# # get the solution
-# xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
-#     grad_hist_constr_euc, defect_hist_constr_euc = \
-#         ipopt_constr_euc.fit(   x0, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
 
 # =====================================================
 # Save Results
@@ -187,6 +190,7 @@ kappa = 1e-2
 def save_results_pickle(filename,
                        xs_ms_se3, us_ms_se3, J_hist_ms_se3, grad_hist_ms_se3, defect_hist_ms_se3,
                        xs_ss_se3, us_ss_se3, J_hist_ss_se3, grad_hist_ss_se3,
+                       xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, grad_hist_logcost_euc, defect_hist_logcost_euc,
                        xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc):
     data = {
         'prob':{
@@ -212,6 +216,13 @@ def save_results_pickle(filename,
             'J_hist': J_hist_ss_se3,
             'grad_hist': grad_hist_ss_se3
         },
+        'logcost_euc': {
+            'xs': xs_logcost_euc,
+            'us': us_logcost_euc,
+            'J_hist': J_hist_logcost_euc,
+            'grad_hist': grad_hist_logcost_euc,
+            'defect_hist': defect_hist_logcost_euc
+        },
         'unconstr_euc': {
             'xs': xs_unconstr_euc,
             'us': us_unconstr_euc,
@@ -229,6 +240,7 @@ def save_results_pickle(filename,
 #     save_results_pickle(SAVE_RESULTS_DIR,
 #                        xs_ms_se3, us_ms_se3, J_hist_ms_se3, grad_hist_ms_se3, defect_hist_ms_se3,
 #                        xs_ss_se3, us_ss_se3, J_hist_ss_se3, grad_hist_ss_se3,
+#                        xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, grad_hist_logcost_euc, defect_hist_logcost_euc,
 #                        xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc)
 
 
@@ -256,6 +268,13 @@ us_ss_se3 = ss_se3_data['us']            # 控制序列 (numpy 数组)
 J_hist_ss_se3 = ss_se3_data['J_hist']    # 目标函数历史 (列表)
 grad_hist_ss_se3 = ss_se3_data['grad_hist']  # 梯度范数历史 (列表)
 
+logcost_euc_data = results['logcost_euc']
+xs_logcost_euc = logcost_euc_data['xs']                  # 状态序列 (numpy 数组)
+us_logcost_euc = logcost_euc_data['us']                  # 控制序列 (numpy 数组)
+J_hist_logcost_euc = logcost_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+grad_hist_logcost_euc = logcost_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+defect_hist_logcost_euc = logcost_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
+
 unconstr_euc_data = results['unconstr_euc']
 xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
 us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
@@ -275,6 +294,10 @@ defect_hist_ms_se3 = np.array(defect_hist_ms_se3)
 J_hist_ss_se3 = np.array(J_hist_ss_se3)
 grad_hist_ss_se3 = np.array(grad_hist_ss_se3)
 
+J_hist_logcost_euc = np.array(J_hist_logcost_euc)
+grad_hist_logcost_euc = np.array(grad_hist_logcost_euc)
+defect_hist_logcost_euc = np.array(defect_hist_logcost_euc)
+
 J_hist_unconstr_euc = np.array(J_hist_unconstr_euc)
 grad_hist_unconstr_euc = np.array(grad_hist_unconstr_euc)
 defect_hist_unconstr_euc = np.array(defect_hist_unconstr_euc)
@@ -288,27 +311,31 @@ defect_hist_unconstr_euc = np.array(defect_hist_unconstr_euc)
 
 violation_orth_ms_se3 = [ np.linalg.norm(x[0][:3,:3].T @ x[0][:3,:3] - np.identity(3)) for x in xs_ms_se3 ]
 violation_orth_ss_se3 = [ np.linalg.norm(x[0][:3,:3].T @ x[0][:3,:3] - np.identity(3)) for x in xs_ss_se3 ]
+violation_orth_logcost_euc = [ np.linalg.norm(x[0][:3,:3].T @ x[0][:3,:3] - np.identity(3)) for x in xs_logcost_euc ]
 violation_orth_unconstr_euc = [ np.linalg.norm(x[0][:3,:3].T @ x[0][:3,:3] - np.identity(3)) for x in xs_unconstr_euc ]
 
 violation_det_ms_se3 = [ 1 - np.linalg.det(x[0][:3,:3]) for x in xs_ms_se3 ]
 violation_det_ss_se3 = [ 1 - np.linalg.det(x[0][:3,:3]) for x in xs_ss_se3 ]
+violation_det_logcost_euc = [ 1 - np.linalg.det(x[0][:3,:3]) for x in xs_logcost_euc ]
 violation_det_unconstr_euc = [ 1 - np.linalg.det(x[0][:3,:3]) for x in xs_unconstr_euc ]
 
 plt.figure()
-ax = plt.subplot(121)
+ax = plt.subplot(131)
+plt.plot( violation_orth_unconstr_euc, label='Embedded Unconstrained' )
+plt.plot( violation_orth_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
 plt.plot( violation_orth_ms_se3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_orth_ss_se3, label=r'SS-iLQR on $\mathcal{M}$' )
-plt.plot( violation_orth_unconstr_euc, label='Embedded Unconstrained' )
 plt.yscale('log')
 plt.ylabel(r'$||R^T R - I_3||$')
 plt.xlabel('Stage')
 plt.legend()
 plt.grid()
 
-ax = plt.subplot(122)
+ax = plt.subplot(132)
+plt.plot( violation_det_unconstr_euc, label='Embedded Unconstrained' )
+plt.plot( violation_det_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
 plt.plot( violation_det_ms_se3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( violation_det_ss_se3, label=r'SS-iLQR on $\mathcal{M}$' )
-plt.plot( violation_det_unconstr_euc, label='Embedded Unconstrained' )
 plt.yscale('log')
 plt.ylabel(r'$|\text{det}(R)-1|$')
 plt.xlabel('Stage')
@@ -321,23 +348,26 @@ plt.grid()
 dyn_error_ms_se3 = [ err_dyn( xs_ms_se3[k], xs_ms_se3[k+1] )  for k in range(Nsim) ]
 dyn_error_ss_se3 = [ err_dyn( xs_ss_se3[k], xs_ss_se3[k+1] )  for k in range(Nsim) ]
 dyn_error_unconstr_euc = [ err_dyn( xs_unconstr_euc[k], xs_unconstr_euc[k+1] )  for k in range(Nsim) ]
+dyn_error_logcost_euc = [ err_dyn( xs_logcost_euc[k], xs_logcost_euc[k+1] )  for k in range(Nsim) ]
 
-plt.figure()
+ax = plt.subplot(133)
+plt.plot( dyn_error_unconstr_euc, label='Embedded Unconstrained' )
+plt.plot( dyn_error_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
 plt.plot( dyn_error_ms_se3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( dyn_error_ss_se3, label=r'SS-iLQR on $\mathcal{M}$' )
-plt.plot( dyn_error_unconstr_euc, label='Embedded Unconstrained' )
 plt.yscale('log')
 plt.ylabel(r'$||\mathcal{X}_{k+1} - F_\mathcal{X}( \mathcal{X}_k, \xi_k )||$')
-plt.xlabel('Iteration')
-plt.legend()
+plt.xlabel('Stage')
+# plt.legend()
 plt.grid()
 
 # # 3. cost comparison
 
 plt.figure()
+plt.plot( J_hist_unconstr_euc, label='Embedded Unconstrained' )
+plt.plot( J_hist_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
 plt.plot( J_hist_ms_se3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( J_hist_ss_se3, label=r'SS-iLQR on $\mathcal{M}$' )
-plt.plot( J_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.yscale('log')
 plt.ylabel(r'$J(\mathbf{x},\mathbf{u})$')
 plt.xlabel('Iteration')
@@ -345,32 +375,35 @@ plt.legend()
 plt.grid()
 
 plt.figure()
+plt.plot( np.abs(J_hist_unconstr_euc[1:]-J_hist_unconstr_euc[:-1]), label='Embedded Unconstrained' )
+plt.plot( np.abs(J_hist_logcost_euc[1:]-J_hist_logcost_euc[:-1]), label=r'Embedded w. $\mathcal{M}$ Cost'  )
 plt.plot( np.abs(J_hist_ms_se3[1:]-J_hist_ms_se3[:-1]), label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( np.abs(J_hist_ss_se3[1:]-J_hist_ss_se3[:-1]), label=r'SS-iLQR on $\mathcal{M}$' )
-plt.plot( np.abs(J_hist_unconstr_euc[1:]-J_hist_unconstr_euc[:-1]), label='Embedded Unconstrained' )
 plt.yscale('log')
 plt.ylabel(r'$|\Delta J(\mathbf{x},\mathbf{u})$|')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 plt.figure()
+plt.plot( grad_hist_unconstr_euc, label='Embedded Unconstrained' )
+plt.plot( grad_hist_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
 plt.plot( grad_hist_ms_se3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( grad_hist_ss_se3, label=r'SS-iLQR on $\mathcal{M}$' )
-plt.plot( grad_hist_unconstr_euc, label='Embedded Unconstrained' )
 plt.yscale('log')
 plt.ylabel('Gradient')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 plt.figure()
-plt.plot( defect_hist_ms_se3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.plot( defect_hist_unconstr_euc, label='Embedded Unconstrained' )
+plt.plot( defect_hist_logcost_euc, label=r'Embedded w. $\mathcal{M}$ Cost' )
+plt.plot( defect_hist_ms_se3, label=r'MS-iLQR on $\mathcal{M}$' )
 plt.yscale('log')
 plt.ylabel(r'$||d||$')
 plt.xlabel('Iteration')
-plt.legend()
+# plt.legend()
 plt.grid()
 
 # 4. Big Plotting: State, Input
@@ -378,23 +411,27 @@ plt.grid()
 euler_ms_se3 = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_ms_se3 ] )
 euler_ss_se3 = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_ss_se3 ] )
 euler_unconstr_euc = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_unconstr_euc ] )
+euler_logcost_euc = np.array([ rotm2euler(x[0][:3,:3]) for x in xs_logcost_euc ] )
 
 omega_ms_se3 = np.array([ x[1][:3] for x in xs_ms_se3 ])
 omega_ss_se3 = np.array([ x[1][:3] for x in xs_ss_se3 ])
 omega_unconstr_euc = np.array([ x[1][:3] for x in xs_unconstr_euc ])
+omega_logcost_euc = np.array([ x[1][:3] for x in xs_logcost_euc ])
 
 pos_ms_se3 = np.array([ x[0][:3,3] for x in xs_ms_se3 ] )
 pos_ss_se3 = np.array([ x[0][:3,3] for x in xs_ss_se3 ] )
 pos_unconstr_euc = np.array([ x[0][:3,3] for x in xs_unconstr_euc ] )
+pos_logcost_euc = np.array([ x[0][:3,3] for x in xs_logcost_euc ] )
 
 vel_ms_se3 = np.array([ x[1][3:] for x in xs_ms_se3 ])
 vel_ss_se3 = np.array([ x[1][3:] for x in xs_ss_se3 ])
 vel_unconstr_euc = np.array([ x[1][3:] for x in xs_unconstr_euc ])
+vel_logcost_euc = np.array([ x[1][3:] for x in xs_logcost_euc ])
 
 
 plt.figure()
 
-plt.subplot(631)
+plt.subplot(641)
 for i in range(3):
     plt.plot( euler_ms_se3[:,i] )
 plt.title(r'MS-iLQR on $\mathcal{M}$')
@@ -403,21 +440,28 @@ plt.ylabel('degree')
 plt.legend([r'$\theta_z$',r'$\theta_x$',r'$\theta_y$'])
 plt.grid()
 
-plt.subplot(632)
+plt.subplot(642)
 for i in range(3):
     plt.plot( euler_ss_se3[:,i] )
 plt.title(r'SS-iLQR on $\mathcal{M}$')
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(633)
+plt.subplot(643)
 for i in range(3):
     plt.plot( euler_unconstr_euc[:,i] )
 plt.title('Embedded Unconstrained')
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(634)
+plt.subplot(644)
+for i in range(3):
+    plt.plot( euler_logcost_euc[:,i] )
+plt.title(r'Embedded w. $\mathcal{M}$ Cost')
+plt.tick_params(axis='x', labelbottom=False)
+plt.grid()
+
+plt.subplot(645)
 for i in range(3):
     plt.plot( omega_ms_se3[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
@@ -425,19 +469,25 @@ plt.ylabel('rad/s')
 plt.legend([r'$\omega_x$',r'$\omega_y$',r'$\omega_z$'])
 plt.grid()
 
-plt.subplot(635)
+plt.subplot(646)
 for i in range(3):
     plt.plot( omega_ss_se3[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(636)
+plt.subplot(647)
 for i in range(3):
     plt.plot( omega_unconstr_euc[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(637)
+plt.subplot(648)
+for i in range(3):
+    plt.plot( omega_logcost_euc[:,i] )
+plt.tick_params(axis='x', labelbottom=False)
+plt.grid()
+
+plt.subplot(649)
 for i in range(3):
     plt.plot( pos_ms_se3[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
@@ -445,21 +495,28 @@ plt.ylabel('m')
 plt.legend([r'$p_x$',r'$p_y$',r'$p_z$'])
 plt.grid()
 
-plt.subplot(638)
+plt.subplot(6,4,10)
 for i in range(3):
     plt.plot( pos_ss_se3[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
 plt.ylabel('m')
 plt.grid()
 
-plt.subplot(639)
+plt.subplot(6,4,11)
 for i in range(3):
     plt.plot( pos_unconstr_euc[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
 plt.ylabel('m')
 plt.grid()
 
-plt.subplot(6,3,10)
+plt.subplot(6,4,12)
+for i in range(3):
+    plt.plot( pos_logcost_euc[:,i] )
+plt.tick_params(axis='x', labelbottom=False)
+plt.ylabel('m')
+plt.grid()
+
+plt.subplot(6,4,13)
 for i in range(3):
     plt.plot( vel_ms_se3[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
@@ -467,19 +524,25 @@ plt.ylabel('m/s')
 plt.legend([r'$v_x$',r'$v_y$',r'$v_z$'])
 plt.grid()
 
-plt.subplot(6,3,11)
+plt.subplot(6,4,14)
 for i in range(3):
     plt.plot( vel_ss_se3[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(6,3,12)
+plt.subplot(6,4,15)
 for i in range(3):
     plt.plot( vel_unconstr_euc[:,i] )
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(6,3,13)
+plt.subplot(6,4,16)
+for i in range(3):
+    plt.plot( vel_logcost_euc[:,i] )
+plt.tick_params(axis='x', labelbottom=False)
+plt.grid()
+
+plt.subplot(6,4,17)
 for i in range(3):
     plt.plot( us_ms_se3[:,i])
 plt.tick_params(axis='x', labelbottom=False)
@@ -487,19 +550,25 @@ plt.ylabel('angular input')
 plt.legend([r'$u_{\theta_x}$',r'$u_{\theta_y}$',r'$u_{\theta_z}$'])
 plt.grid()
 
-plt.subplot(6,3,14)
+plt.subplot(6,4,18)
 for i in range(3):
     plt.plot( us_ss_se3[:,i])
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(6,3,15)
+plt.subplot(6,4,19)
 for i in range(3):
     plt.plot( us_unconstr_euc[:,i])
 plt.tick_params(axis='x', labelbottom=False)
 plt.grid()
 
-plt.subplot(6,3,16)
+plt.subplot(6,4,20)
+for i in range(3):
+    plt.plot( us_logcost_euc[:,i])
+plt.tick_params(axis='x', labelbottom=False)
+plt.grid()
+
+plt.subplot(6,4,21)
 for i in range(3):
     plt.plot( us_ms_se3[:,3+i])
 plt.ylabel('translational input')
@@ -507,18 +576,23 @@ plt.xlabel('Stage')
 plt.legend([r'$u_{p_x}$',r'$u_{p_y}$',r'$u_{p_z}$'])
 plt.grid()
 
-plt.subplot(6,3,17)
+plt.subplot(6,4,22)
 for i in range(3):
-    plt.plot( us_ms_se3[:,3+i])
+    plt.plot( us_ss_se3[:,3+i])
 plt.xlabel('Stage')
 plt.grid()
 
-plt.subplot(6,3,18)
+plt.subplot(6,4,23)
 for i in range(3):
-    plt.plot( us_ms_se3[:,3+i])
+    plt.plot( us_unconstr_euc[:,3+i])
 plt.xlabel('Stage')
 plt.grid()
 
+plt.subplot(6,4,24)
+for i in range(3):
+    plt.plot( us_logcost_euc[:,3+i])
+plt.xlabel('Stage')
+plt.grid()
 
 
 # 5. 3D plotting, plotting all 4 solutions in one figure for comparison
@@ -526,6 +600,7 @@ plt.grid()
 pos_ms_se3 = np.array([x[0][:3,3] for x in xs_ms_se3]).reshape(N+1, 3)
 pos_ss_se3 = np.array([x[0][:3,3] for x in xs_ss_se3]).reshape(N+1, 3)
 pos_unconstr_euc = np.array([x[0][:3,3] for x in xs_unconstr_euc]).reshape(N+1, 3)
+pos_logcost_euc = np.array([x[0][:3,3] for x in xs_logcost_euc]).reshape(N+1, 3)
 
 pos_ref = np.array([x[:3,3] for x in q_ref]).reshape(N+1, 3)
 
@@ -544,7 +619,7 @@ pos_ref = np.array([x[:3,3] for x in q_ref]).reshape(N+1, 3)
 # # plt.legend()
 
 fig = plt.figure()
-ax = fig.add_subplot(131, projection='3d')
+ax = fig.add_subplot(221, projection='3d')
 ax.set_title(r'MS-iLQR on $\mathcal{M}$')
 ax.plot(pos_ms_se3[:, 0], pos_ms_se3[:, 1], pos_ms_se3[:, 2])
 ax.plot(pos_ref[:, 0], pos_ref[:, 1], pos_ref[:, 2])
@@ -554,7 +629,7 @@ ax.set_zlabel('z')
 plt.legend([r'$\mathcal{X}$',r'$\mathcal{X}_\text{ref}$'])
 ax.set_zlim(-0.5, 2.5)
 
-ax = fig.add_subplot(132, projection='3d')
+ax = fig.add_subplot(222, projection='3d')
 ax.set_title(r'SS-iLQR on $\mathcal{M}$')
 ax.plot(pos_ss_se3[:, 0], pos_ss_se3[:, 1], pos_ss_se3[:, 2])
 ax.plot(pos_ref[:, 0], pos_ref[:, 1], pos_ref[:, 2])
@@ -563,9 +638,18 @@ ax.set_ylabel('y')
 ax.set_zlabel('z')
 ax.set_zlim(-0.5, 2.5)
 
-ax = fig.add_subplot(133, projection='3d')
+ax = fig.add_subplot(223, projection='3d')
 ax.set_title('Embedded Unconstrained')
 ax.plot(pos_unconstr_euc[:, 0], pos_unconstr_euc[:, 1], pos_unconstr_euc[:, 2])
+ax.plot(pos_ref[:, 0], pos_ref[:, 1], pos_ref[:, 2])
+ax.set_xlabel('x')
+ax.set_ylabel('y')
+ax.set_zlabel('z')
+ax.set_zlim(-0.5, 2.5)
+
+ax = fig.add_subplot(224, projection='3d')
+ax.set_title(r'Embedded w. $\mathcal{M}$ Cost')
+ax.plot(pos_logcost_euc[:, 0], pos_logcost_euc[:, 1], pos_logcost_euc[:, 2])
 ax.plot(pos_ref[:, 0], pos_ref[:, 1], pos_ref[:, 2])
 ax.set_xlabel('x')
 ax.set_ylabel('y')
