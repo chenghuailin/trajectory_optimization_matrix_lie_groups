@@ -912,7 +912,6 @@ class iLQR_Tracking_SO3(BaseController):
                     self._delta = max(1.0, self._delta) * self._delta_0
                     self._mu = max(self._mu_min, self._mu * self._delta)
 
-
                     if self._mu_max and self._mu >= self._mu_max:
                         warnings.warn("exceeded max regularization term")
                         break
@@ -1065,6 +1064,7 @@ class iLQR_Tracking_SO3_MS(BaseController):
         # Regularization terms: Levenberg-Marquardt parameter.
         # See II F. Regularization Schedule.
         self._mu = 1.0
+        # self._mu = 0.0
         self._mu_min = 1e-6
         self._mu_max = max_reg
         self._delta_0 = 2.0
@@ -1663,6 +1663,20 @@ class iLQR_Tracking_SO3_MS(BaseController):
                     if self._mu <= self._mu_min:
                             self._mu = 0.0
                     break
+
+                # if not is_pos_def(Q_uu + Q_uu.T):
+                #     # Increase regularization term.
+                #     if self._mu == 0.0:
+                #         self._mu = 1e-3
+                #     else:
+                #         self._mu *= 10
+
+                #     if self._mu_max and self._mu >= self._mu_max:
+                #         warnings.warn("exceeded max regularization term")
+                #         break
+                # else:
+                #     self._mu = 0.0
+                #     break
 
             # Eq (6).
             k[i] = -np.linalg.solve(Q_uu, Q_u)

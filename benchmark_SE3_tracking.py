@@ -55,10 +55,10 @@ with open( path_to_reference_file, 'rb' ) as f:
     xi_ref = np.load(f)
 
 Nsim = q_ref.shape[0] - 1
-# Nsim = 300
+
+# Nsim = 150
 # q_ref = q_ref[:Nsim+1]
 # xi_ref = xi_ref[:Nsim+1]
-
 
 
 q0 = SE3(
@@ -130,21 +130,21 @@ ilqr_ss_se3 = iLQR_Tracking_SE3(    dynamics, cost, N,
                                     hessians=HESSIANS,
                                     rollout='nonlinear' )
 
-# xs_ms_se3, us_ms_se3, J_hist_ms_se3, _, _, \
-#     grad_hist_ms_se3, defect_hist_ms_se3= \
-#         ilqr_ms_se3.fit(x0, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ms_se3)
+xs_ms_se3, us_ms_se3, J_hist_ms_se3, _, _, \
+    grad_hist_ms_se3, defect_hist_ms_se3= \
+        ilqr_ms_se3.fit(x0, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ms_se3)
 
-# xs_ss_se3, us_ss_se3, J_hist_ss_se3, _, _, grad_hist_ss_se3 = \
-#         ilqr_ss_se3.fit(x0, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ss_se3)
+xs_ss_se3, us_ss_se3, J_hist_ss_se3, _, _, grad_hist_ss_se3 = \
+        ilqr_ss_se3.fit(x0, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ss_se3)
 
 # =====================================================
-# Embedded Euclidean Unconstrained Method
+# Embedded Euclidean Unconstrained Method with Manifold Cost
 # =====================================================
 eps_init = 1e-3
 # kappa = 1e-2
@@ -161,26 +161,26 @@ ipopt_logcost_euc = EmbeddedEuclideanSE3(   q_ref, xi_ref, dt, J, Q, R,
 #                                               eps_init=eps_init, 
 #                                               kappa=kappa )
 
-# # get the solution
-# xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, \
-#     grad_hist_logcost_euc, defect_hist_logcost_euc = \
-#         ipopt_logcost_euc.fit(   x0, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, \
+    grad_hist_logcost_euc, defect_hist_logcost_euc = \
+        ipopt_logcost_euc.fit(  x0, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 # =====================================================
-# Embedded Euclidean Unconstrained Method with Manifold Cost
+# Embedded Euclidean Unconstrained Method 
 # =====================================================
 # intialize the embedded method
 ipopt_unconstr_euc = EmbeddedEuclideanSE3_MatrixNorm(   q_ref, xi_ref, dt, J, Q, R, 
                                                         eps_init=eps_init )
 
-# # get the solution
-# xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
-#     grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
-#         ipopt_unconstr_euc.fit( x0, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
+    grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
+        ipopt_unconstr_euc.fit( x0, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 
 # =====================================================
@@ -248,39 +248,39 @@ def save_results_pickle(filename,
 # # Load Results
 # # =====================================================
 
-def load_results_pickle(filename):
-    with open(filename, 'rb') as f:
-        data = pickle.load(f)
-    return data
+# def load_results_pickle(filename):
+#     with open(filename, 'rb') as f:
+#         data = pickle.load(f)
+#     return data
 
-results = load_results_pickle(SAVE_RESULTS_DIR)
+# results = load_results_pickle(SAVE_RESULTS_DIR)
 
-ms_se3_data = results['ms_se3']
-xs_ms_se3 = ms_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-us_ms_se3 = ms_se3_data['us']            # 控制序列 (numpy 数组)
-J_hist_ms_se3 = ms_se3_data['J_hist']    # 目标函数历史 (列表)
-grad_hist_ms_se3 = ms_se3_data['grad_hist']  # 梯度范数历史 (列表)
-defect_hist_ms_se3 = ms_se3_data['defect_hist']  # 缺陷范数历史 (列表)
+# ms_se3_data = results['ms_se3']
+# xs_ms_se3 = ms_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+# us_ms_se3 = ms_se3_data['us']            # 控制序列 (numpy 数组)
+# J_hist_ms_se3 = ms_se3_data['J_hist']    # 目标函数历史 (列表)
+# grad_hist_ms_se3 = ms_se3_data['grad_hist']  # 梯度范数历史 (列表)
+# defect_hist_ms_se3 = ms_se3_data['defect_hist']  # 缺陷范数历史 (列表)
 
-ss_se3_data = results['ss_se3']
-xs_ss_se3 = ss_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-us_ss_se3 = ss_se3_data['us']            # 控制序列 (numpy 数组)
-J_hist_ss_se3 = ss_se3_data['J_hist']    # 目标函数历史 (列表)
-grad_hist_ss_se3 = ss_se3_data['grad_hist']  # 梯度范数历史 (列表)
+# ss_se3_data = results['ss_se3']
+# xs_ss_se3 = ss_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+# us_ss_se3 = ss_se3_data['us']            # 控制序列 (numpy 数组)
+# J_hist_ss_se3 = ss_se3_data['J_hist']    # 目标函数历史 (列表)
+# grad_hist_ss_se3 = ss_se3_data['grad_hist']  # 梯度范数历史 (列表)
 
-logcost_euc_data = results['logcost_euc']
-xs_logcost_euc = logcost_euc_data['xs']                  # 状态序列 (numpy 数组)
-us_logcost_euc = logcost_euc_data['us']                  # 控制序列 (numpy 数组)
-J_hist_logcost_euc = logcost_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
-grad_hist_logcost_euc = logcost_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
-defect_hist_logcost_euc = logcost_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
+# logcost_euc_data = results['logcost_euc']
+# xs_logcost_euc = logcost_euc_data['xs']                  # 状态序列 (numpy 数组)
+# us_logcost_euc = logcost_euc_data['us']                  # 控制序列 (numpy 数组)
+# J_hist_logcost_euc = logcost_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+# grad_hist_logcost_euc = logcost_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+# defect_hist_logcost_euc = logcost_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
 
-unconstr_euc_data = results['unconstr_euc']
-xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
-us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
-J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
-grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
-defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
+# unconstr_euc_data = results['unconstr_euc']
+# xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
+# us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
+# J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+# grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+# defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
 
 
 # # =====================================================

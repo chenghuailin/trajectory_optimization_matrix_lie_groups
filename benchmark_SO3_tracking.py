@@ -11,7 +11,7 @@ from traoptlibrary.traopt_baseline import EmbeddedEuclideanSO3, ConstraintStabil
 from scipy.spatial.transform import Rotation
 from manifpy import SO3, SO3Tangent
 
-SAVE_RESULTS = True
+SAVE_RESULTS = False
 SAVE_RESULTS_DIR = 'visualization/results_benchmark/results_so3_tracking_benchmark.pkl'
 
 # =====================================================
@@ -57,13 +57,23 @@ with open( path_to_reference_file, 'rb' ) as f:
 Nsim = q_ref.shape[0] - 1
 print("Horizon of dataset is", Nsim)
 
+# Nsim = 150
+# q_ref = q_ref[:Nsim+1]
+# xi_ref = xi_ref[:Nsim+1]
+
 # q0 = SO3( Rotation.from_matrix(q_ref[0]).as_quat() ) 
 # xi0 = SO3Tangent( xi_ref[0] )
 
 q0 = SO3( 
     Rotation.from_euler('zxy', [90.,10.,45.], degrees=True).as_quat() 
 ) 
-omega0 = 1.7 * 1e-1 
+omega0 = 1.5 * 1e-1 
+
+# q0 = SO3( 
+#     Rotation.from_euler('zxy', [120.,60.,65.], degrees=True).as_quat() 
+# ) 
+# omega0 = 1.7 * 1e-1 
+
 xi0 = SO3Tangent( np.ones((3,1)) * omega0 )
 x0_mnf = [ q0, xi0 ]
 x0_np = [ q0.rotation(), xi0.coeffs() ]
@@ -103,6 +113,10 @@ dynamics = SO3Dynamics( J, dt, hessians=HESSIANS )
 Q = np.diag([10., 10., 10., 1., 1., 1.,])
 P = Q * 10
 R = np.identity(3) * 1e-3 # 就这个了！
+
+# Q = np.diag([10., 10., 10., 1., 1., 1.,])/10
+# P = Q * 10
+# R = np.identity(3) * 1e-4 # 就这个了！
 cost = SO3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref )
 
 us_init = np.zeros((N, action_size,))
@@ -117,20 +131,20 @@ ilqr_ss_so3 = iLQR_Tracking_SO3(    dynamics, cost, N,
                                     hessians=HESSIANS,
                                     rollout='nonlinear' )
 
-# xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
-#     grad_hist_ms_so3, defect_hist_ms_so3= \
-#         ilqr_ms_so3.fit(x0_mnf, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ms_so3)
-# xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
+xs_ms_so3, us_ms_so3, J_hist_ms_so3, _, _, \
+    grad_hist_ms_so3, defect_hist_ms_so3= \
+        ilqr_ms_so3.fit(x0_mnf, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ms_so3)
+xs_ms_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ms_so3 ]
 
-# xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
-#         ilqr_ss_so3.fit(x0_mnf, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ss_so3)
-# xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
+xs_ss_so3, us_ss_so3, J_hist_ss_so3, _, _, grad_hist_ss_so3 = \
+        ilqr_ss_so3.fit(x0_mnf, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ss_so3)
+xs_ss_so3 = [ [x[0].rotation(), x[1].coeffs() ] for x in xs_ss_so3 ]
 
 # =====================================================
 # Unconstrained Embedded Space Method with Log Cost
@@ -139,12 +153,12 @@ ilqr_ss_so3 = iLQR_Tracking_SO3(    dynamics, cost, N,
 # intialize the embedded method
 ipopt_logcost_euc = EmbeddedEuclideanSO3( q_ref, xi_ref, dt, J, Q, R )
 
-# # get the solution
-# xs_logcost_euc , us_logcost_euc , J_hist_logcost_euc , \
-#     grad_hist_logcost_euc , defect_hist_logcost_euc = \
-#         ipopt_logcost_euc.fit(  x0_np, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_logcost_euc , us_logcost_euc , J_hist_logcost_euc , \
+    grad_hist_logcost_euc , defect_hist_logcost_euc = \
+        ipopt_logcost_euc.fit(  x0_np, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 # =====================================================
 # Unconstrained Embedded Space Method
@@ -153,26 +167,27 @@ ipopt_logcost_euc = EmbeddedEuclideanSO3( q_ref, xi_ref, dt, J, Q, R )
 # intialize the embedded method
 ipopt_unconstr_euc = EmbeddedEuclideanSO3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R )
 
-# # get the solution
-# xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
-#     grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
-#         ipopt_unconstr_euc.fit( x0_np, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
+    grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
+        ipopt_unconstr_euc.fit( x0_np, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 # =====================================================
 # Constraint Stabilization Method
 # =====================================================
+kappa = 1e-2
 
 # intialize the embedded method
-ipopt_constr_euc = ConstraintStabilizationSO3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R )
+ipopt_constr_euc = ConstraintStabilizationSO3_MatrixNorm( q_ref, xi_ref, dt, J, Q, R, kappa=kappa )
 
-# # get the solution
-# xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
-#     grad_hist_constr_euc, defect_hist_constr_euc = \
-#         ipopt_constr_euc.fit(   x0_np, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_constr_euc, us_constr_euc, J_hist_constr_euc, \
+    grad_hist_constr_euc, defect_hist_constr_euc = \
+        ipopt_constr_euc.fit(   x0_np, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 # =====================================================
 # Save Results
@@ -181,7 +196,7 @@ ipopt_constr_euc = ConstraintStabilizationSO3_MatrixNorm( q_ref, xi_ref, dt, J, 
 def save_results_pickle(filename,
                        xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
                        xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
-                       xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, grad_hist_logcost_euc, defect_hist_unconstr_euc,
+                       xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, grad_hist_logcost_euc, defect_hist_logcost_euc,
                        xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, grad_hist_unconstr_euc, defect_hist_unconstr_euc,
                        xs_constr_euc, us_constr_euc, J_hist_constr_euc, grad_hist_constr_euc, defect_hist_constr_euc):
     data = {
@@ -235,7 +250,7 @@ def save_results_pickle(filename,
         pickle.dump(data, f)
     print(f"Results saved to {filename}")
 
-if SAVE_RESULTS:
+# if SAVE_RESULTS:
     # save_results_pickle(SAVE_RESULTS_DIR,
     #                    xs_ms_so3, us_ms_so3, J_hist_ms_so3, grad_hist_ms_so3, defect_hist_ms_so3,
     #                    xs_ss_so3, us_ss_so3, J_hist_ss_so3, grad_hist_ss_so3,
@@ -267,6 +282,13 @@ if SAVE_RESULTS:
 # us_ss_so3 = ss_so3_data['us']            # 控制序列 (numpy 数组)
 # J_hist_ss_so3 = ss_so3_data['J_hist']    # 目标函数历史 (列表)
 # grad_hist_ss_so3 = ss_so3_data['grad_hist']  # 梯度范数历史 (列表)
+
+# logcost_euc_data = results['logcost_euc']
+# xs_logcost_euc = logcost_euc_data['xs']                  # 状态序列 (numpy 数组)
+# us_logcost_euc = logcost_euc_data['us']                  # 控制序列 (numpy 数组)
+# J_hist_logcost_euc = logcost_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+# grad_hist_logcost_euc = logcost_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+# defect_hist_logcost_euc = logcost_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
 
 # unconstr_euc_data = results['unconstr_euc']
 # xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)

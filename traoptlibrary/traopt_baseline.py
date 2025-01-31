@@ -691,7 +691,7 @@ class EmbeddedEuclideanSO3_MatrixNorm(BaseController):
         #     """
         #     return expm( ca.skew(omega) * h )
 
-        # 初始条件
+        # initial constraint
         opti.subject_to(R_vars[0] - R0 == 0)
         opti.subject_to(w_vars[0] - w0 == 0)
 
@@ -703,7 +703,7 @@ class EmbeddedEuclideanSO3_MatrixNorm(BaseController):
             wk_next= w_vars[k+1]
             uk     = u_vars[k]
 
-            # 离散化: R_{k+1} = R_k * exp(w_k^∧ * dt)
+            #  R_{k+1} = R_k * exp(w_k^∧ * dt)
             Rk_prop = ca.mtimes(Rk, exp_so3(wk, dt))
             opti.subject_to( Rk_next - Rk_prop == 0)
 
@@ -1621,7 +1621,7 @@ class ConstraintStabilizationSO3_Pendulum3D(BaseController):
         return xs, us, J_hist, grad_hist, defect_hist
 
 
-# not completed
+
 class ConstraintStabilizationSO3_MatrixNorm(BaseController):
     """
     Baseline: Constraint Stabilization method.
@@ -1635,7 +1635,7 @@ class ConstraintStabilizationSO3_MatrixNorm(BaseController):
         dt,
         J,
         Q, R,
-        kappa = 1e0,
+        kappa = 1e-1,
         verbose=False
     ):
         """
@@ -1768,7 +1768,7 @@ class ConstraintStabilizationSO3_MatrixNorm(BaseController):
 
             # 离散化: R_{k+1} = R_k * exp(w_k^∧ * dt)
             Rk_prop = ca.mtimes(Rk, 
-                                exp_so3(wk, dt) + self.kappa/2 * ( ca.inv(ca.mtimes(ca.transpose(Rk), Rk)) - ca.DM.eye(3)))
+                                exp_so3(wk, dt) + self.kappa/2 * (    ca.inv( ca.mtimes(ca.transpose(Rk), Rk) ) - ca.DM.eye(3)    ))
             opti.subject_to( Rk_next - Rk_prop == 0)
 
             # w_{k+1} = w_k + dt*J_inv( J w_k x w_k + u_k )
@@ -4401,6 +4401,302 @@ class ConstraintStabilizationSE3_MatrixNorm(BaseController):
         J_hist     = iter_stats.get('obj', [])
         grad_hist  = iter_stats.get('inf_du', [])
         defect_hist= iter_stats.get('inf_pr', [])
+
+        return xs, us, J_hist, grad_hist, defect_hist
+    
+
+
+class EmbeddedEuclideanSU2_MatrixNorm(BaseController):
+    """
+    Baseline: Embedded Euclidean Space method.
+    使用CasADi + IPOPT在 R^4 上直接进行优化，
+    """
+
+    def __init__(
+        self,
+        q_ref,
+        xi_ref,
+        dt,
+        J,
+        Q, R,
+        verbose=False
+    ):
+        """
+        构造函数，传入参考轨迹、模型参数、权重矩阵等。
+
+        Args:
+            q_ref: list/ndarray of shape (N+1, 3, 3) or something representing the desired rotation matrix
+            xi_ref: list/ndarray of shape (N+1, 3) for angular velocity references
+            dt: float or ndarray, time step
+            J: inertia matrix
+            Qx, Qw, QxN, QwN: weight matrices for cost
+            R_mat: control cost weight
+            max_ipopt_iter: ipopt最大迭代次数
+            verbose: 是否在求解过程中输出 ipopt 的详细信息
+        """
+        super(EmbeddedEuclideanSU2_MatrixNorm, self).__init__()
+
+        # self.q_ref = q_ref
+        self.q_ref = [Rotation.from_matrix(q).as_quat(scalar_first=True) for q in q_ref ]
+
+        self.xi_ref = xi_ref
+        self.dt = dt
+        self.J = J
+        self.J_inv = np.linalg.inv(J)
+
+        # Weight Matrics
+        Qx = Q[:3,:3]
+        Qw = Q[3:,3:]
+        self.Qx = Qx
+        self.Qw = Qw
+        self.QxN = 10 * Qx
+        self.QwN = 10 * Qw
+        self.R_ = R
+
+        # Matrix Norm Weight
+        self.alpha = Qx[0,0]
+        self.alphaN = self.alpha * 10
+
+        # IPOPT solver setup
+        self.verbose = verbose
+
+        # Horizon
+        self.N = len(self.q_ref) - 1
+
+    def fit(
+        self, 
+        x0,            # [R0, w0], 其中 R0是3x3, w0是3x1
+        us_init,       
+        n_iterations=200,  
+        tol_norm=1e-6,
+    ):
+        """
+        构建并调用 IPOPT 优化，得到最优 (R, w, u) 序列。
+
+        Returns:
+            xs: [N+1, [R_k, w_k]] 最优解的状态轨迹
+            us: [N, 3] 最优解的控制输入序列
+            J_hist: [若干] 各迭代的cost
+            xs_hist: [若干次迭代] 状态的历史，这里只存 初值 和 最终解
+            us_hist: [同上]
+            grad_hist: [同上] 这里可自行约定如何衡量
+            defect_hist: [同上] 用来存放动力学违背量
+        """
+        # ----------------------------
+        #  0) 一些准备工作
+        # ----------------------------
+        Nsim = self.N
+        q0, w0 = x0[0], x0[1]   # R0 shape (3,3), w0 shape (3,)
+        dt = self.dt
+
+        # ----------------------------
+        #  1) 构建CasADi优化变量
+        # ----------------------------
+        opti = ca.Opti()
+        q_vars = []
+        w_vars = []
+        u_vars = []
+
+        for k in range(Nsim+1):
+            # 优化变量: R_k是3x3, w_k是3x1
+            qk = opti.variable(4,1)
+            wk = opti.variable(3,1)
+            q_vars.append(qk)
+            w_vars.append(wk)
+
+            if k < Nsim:
+                uk = opti.variable(3,1)
+                u_vars.append(uk)
+
+        # 设置初值
+        opti.set_initial(q_vars[0], q0)
+        opti.set_initial(w_vars[0], w0)
+        for k in range(1, Nsim+1):
+            opti.set_initial(q_vars[k], self.q_ref[k])
+            opti.set_initial(w_vars[k], self.xi_ref[k])
+        for k in range(Nsim):
+            opti.set_initial(u_vars[k], us_init[k])
+
+        # ----------------------------
+        #  2) 动力学约束 + 初始条件 + 正交约束(可选)
+        # ----------------------------
+        J_inv = self.J_inv
+
+        def Omega(wk):
+            """
+            Constructs the Omega matrix for quaternion dynamics.
+
+            Args:
+                wk: CasADi symbolic variable of shape (3, 1) representing angular velocity.
+
+            Returns:
+                A 4x4 CasADi DM matrix representing Omega(wk).
+            """
+            w1, w2, w3 = wk[0], wk[1], wk[2]
+            
+            # Construct each row of the Omega matrix
+            row1 = ca.horzcat(0,    -w1, -w2, -w3)
+            row2 = ca.horzcat(w1,    0,  -w3,  w2)
+            row3 = ca.horzcat(w2,  w3,    0,  -w1)
+            row4 = ca.horzcat(w3,  -w2,  w1,    0)
+            
+            # Vertically concatenate the rows to form the Omega matrix
+            Omega = ca.vertcat(row1, row2, row3, row4)
+            
+            return Omega
+        
+        def E(qk):
+            """
+            Constructs the Omega matrix for quaternion dynamics.
+
+            Args:
+                wk: CasADi symbolic variable of shape (3, 1) representing angular velocity.
+
+            Returns:
+                A 4x4 CasADi DM matrix representing Omega(wk).
+            """
+            w0, w1, w2, w3 = qk[0], qk[1], qk[2], qk[3]
+            
+            # Construct each row of the Omega matrix
+            row1 = ca.horzcat(w0,    -w1, -w2, -w3)
+            row2 = ca.horzcat(w1,    w0,  -w3,  w2)
+            row3 = ca.horzcat(w2,  w3,    w0,  -w1)
+            row4 = ca.horzcat(w3,  -w2,  w1,    w0)
+            
+            # Vertically concatenate the rows to form the Omega matrix
+            Omega = ca.vertcat(row1, row2, row3, row4)
+            
+            return Omega
+
+
+        def inv_quat(quat):
+            qw, qx, qy, qz = quat
+            return ca.vertcat(qw, -qx, -qy, -qz)
+
+        # initial constraint
+        opti.subject_to(q_vars[0] - q0 == 0)
+        opti.subject_to(w_vars[0] - w0 == 0)
+
+        # 动力学
+        for k in range(Nsim):
+            qk     = q_vars[k]
+            qk_next= q_vars[k+1]
+            wk     = w_vars[k]
+            wk_next= w_vars[k+1]
+            uk     = u_vars[k]
+
+            #  manifold dynamics
+            qk_prop = qk - dt * 0.5 * ca.mtimes( Omega(wk), qk )
+            opti.subject_to( qk_next - qk_prop == 0)
+
+            # w_{k+1} = w_k + dt*J_inv( J w_k x w_k + u_k )
+            cross_term = ca.cross( self.J@wk, wk )
+            wk_prop = wk + dt * ( J_inv @ (cross_term + uk) )
+            opti.subject_to( wk_next - wk_prop == 0)
+
+            # # norm == 1
+            # opti.subject_to( ca.sumsqr(qk) - 1 < 1e-12 )
+            # opti.subject_to(  1 - ca.sumsqr(qk) < 1e-12 )
+            # opti.subject_to(  ca.sumsqr(qk) == 1 )
+
+        # ----------------------------
+        #  3) 构建目标函数
+        # ----------------------------
+        cost_expr = 0
+
+        for k in range(Nsim):
+            qk = q_vars[k]
+            wk = w_vars[k]
+            uk = u_vars[k]
+
+            # 参考值
+            q_ref_k = self.q_ref[k]
+            w_ref_k = self.xi_ref[k]
+
+            q_diff = qk - ca.DM(q_ref_k)
+            cost_att = self.alpha * ca.sumsqr(q_diff)
+
+            # q_diff = E( qk ) @ inv_quat( q_ref_k )
+            # q_diff = E(inv_quat( q_ref_k )) @ qk
+            # cost_att = self.alpha * ca.sumsqr(q_diff[1:])
+
+            w_diff = wk - ca.DM(w_ref_k)
+            cost_w = w_diff.T @ self.Qw @ w_diff
+
+            cost_u = uk.T @ self.R_ @ uk
+
+            cost_expr += cost_att + cost_w + cost_u
+
+        # 终端项
+        q_N = q_vars[Nsim]
+        w_N = w_vars[Nsim]
+        q_refN = self.q_ref[Nsim]
+        w_refN = self.xi_ref[Nsim]
+
+        q_diff = q_N - ca.DM(q_refN)
+        cost_attN = self.alphaN * ca.sumsqr(q_diff)
+
+        # q_diff = E( q_N ) @ inv_quat( q_refN )
+        # q_diff = E(inv_quat( q_refN )) @ q_N
+        # cost_attN = self.alphaN * ca.sumsqr(q_diff[1:])
+
+        w_diffN = w_N - ca.DM(w_refN)
+        cost_wN = w_diffN.T @ self.QwN @ w_diffN
+
+        cost_expr += cost_attN + cost_wN
+
+        # 设置目标
+        opti.minimize(cost_expr)
+
+        # ----------------------------
+        #  4) 配置 IPOPT 并求解
+        # ----------------------------
+        p_opts = {"verbose": self.verbose}
+        s_opts = {
+            "max_iter": n_iterations,
+            "tol": tol_norm,
+            "acceptable_tol": tol_norm
+        }
+        opti.solver("ipopt", p_opts, s_opts)
+
+        try:
+            sol = opti.solve()
+        except RuntimeError as e:
+            warnings.warn(f"IPOPT solver failed: {e}")
+            return None, None, [], [], []
+
+        # ----------------------------
+        #  5) 取回解并计算一次Cost/Defect
+        # ----------------------------        
+        q_sol = []
+        w_sol = []
+        u_sol = []
+
+        for k in range(Nsim+1):
+            q_sol_k = sol.value(q_vars[k]).ravel()
+            w_sol_k = sol.value(w_vars[k]).ravel()
+            q_sol.append(q_sol_k)
+            w_sol.append(w_sol_k)
+            if k < Nsim:
+                u_sol_k = sol.value(u_vars[k]).ravel()
+                u_sol.append(u_sol_k)
+
+        # （1）把 R_sol, w_sol 转化为 xs 的形式
+        xs = []
+        for k in range(Nsim+1):
+            xs.append([q_sol[k], w_sol[k]])  # 只是一个简单的列表结构
+
+        # （2）reshape u_sol into us
+        us = np.array(u_sol).reshape(Nsim, 3)
+
+        # （3）Cost
+        J_hist = sol.stats()['iterations']['obj']
+
+        # （4）动力学违背(Defect)
+        defect_hist = sol.stats()['iterations']['inf_pr']
+
+        # （5）gradient
+        grad_hist = sol.stats()['iterations']['inf_du']
 
         return xs, us, J_hist, grad_hist, defect_hist
     

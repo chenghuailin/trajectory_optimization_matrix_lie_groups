@@ -2,13 +2,13 @@ import pickle
 import numpy as np
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
-from traoptlibrary.traopt_utilis import rotm2euler, SE32manifSE3, se32manifse3, manifSE32SE3
+from traoptlibrary.traopt_utilis import rotm2euler, SE32manifSE3, se32manifse3, manifSE32SE3, rotmpos2SE3
 from traoptlibrary.traopt_dynamics import DroneDynamics
 from traoptlibrary.traopt_cost import SE3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_controller import iLQR_Tracking_SE3_MS, iLQR_Tracking_SE3
 from traoptlibrary.traopt_baseline import EmbeddedEuclideanSE3_Drone, EmbeddedEuclideanSE3_Drone_MatrixNorm
 from scipy.spatial.transform import Rotation
-from manifpy import SE3, SE3Tangent
+from manifpy import SE3, SE3Tangent, SO3
 
 SAVE_RESULTS = False
 SAVE_RESULTS_DIR = 'visualization/results_benchmark/results_drone_racing_tracking_benchmark.pkl'
@@ -40,30 +40,59 @@ def on_iteration_ss_se3(iteration_count, xs, us, J_opt, accepted, converged,grad
     print("Iteration", iteration_count, info, J_opt, grad_wrt_input_norm, alpha, mu)
 
 # =====================================================
-# Problem Import: Reference, Initial State, Solver Options
+# Fixed Reference , Initial State,
 # =====================================================
 
 dt = 0.004
 
-path_to_reference_file = \
-    'visualization/optimized_trajectories/path_dense_random_columns_4obj.npy'
+Nsim = 100
 
-with open( path_to_reference_file, 'rb' ) as f:
-    q_ref = np.load(f)
-    xi_ref = np.load(f)
-
-Nsim = q_ref.shape[0] - 1
-# Nsim = 300
-# q_ref = q_ref[:Nsim+1]
-# xi_ref = xi_ref[:Nsim+1]
+q_ref = rotmpos2SE3( 
+    SO3.Identity().rotation(),
+    np.array([1,1,1])*0.5
+)
+q_ref =  [q_ref] * (Nsim+1)
+xi_ref =  np.ones((6,)) * 1e-3
+xi_ref = [xi_ref] * (Nsim+1)
 
 q0 = SE3(
-    position = -0.3 * np.ones((3,)) + q_ref[0][:3,3],
+    position = np.ones((3,))*1e-3,
     # quaternion = Rotation.identity().as_quat()
-    quaternion = Rotation.from_euler('zxy', [1e-4,0.,0.], degrees=True).as_quat() 
+    quaternion = Rotation.from_euler('zxy', [0,10,10], degrees=True).as_quat() 
 ).transform()
 xi0 = np.ones((6,)) * 1e-2
 x0 = [ q0, xi0 ]
+
+# =====================================================
+# Problem Import: Reference, Initial State
+# =====================================================
+
+# dt = 0.004
+
+# path_to_reference_file = \
+#     'visualization/optimized_trajectories/path_dense_random_columns_4obj.npy'
+
+# with open( path_to_reference_file, 'rb' ) as f:
+#     q_ref = np.load(f)
+#     xi_ref = np.load(f)
+
+
+# Nsim = 500
+# q_ref = q_ref[:Nsim+1]
+# xi_ref = xi_ref[:Nsim+1]
+
+# q0 = SE3(
+#     position = -0.3 * np.ones((3,)) + q_ref[0][:3,3],
+#     # quaternion = Rotation.identity().as_quat()
+#     quaternion = Rotation.from_euler('zxy', [1e-4,0.,0.], degrees=True).as_quat() 
+# ).transform()
+# xi0 = np.ones((6,)) * 1e-2
+# x0 = [ q0, xi0 ]
+
+
+# =====================================================
+# Problem Import:  Solver Options
+# =====================================================
 
 m = 1
 Ib = np.diag([ 0.5,0.7,0.9 ])
@@ -71,10 +100,6 @@ J = np.block([
     [Ib, np.zeros((3, 3))],
     [np.zeros((3, 3)), m * np.identity(3)]
 ])
-
-Nsim = 500
-q_ref = q_ref[:Nsim+1]
-xi_ref = xi_ref[:Nsim+1]
 
 print("Horizon of dataset is", Nsim)
 
@@ -109,12 +134,19 @@ state_size = 12
 
 dynamics = DroneDynamics( J, dt, hessians=HESSIANS )
 
+# Q = np.diag([ 
+#     25., 25., 25., 10., 10., 10.,
+#     1., 1., 1., 1., 1., 1. 
+# ]) / 25
 Q = np.diag([ 
     25., 25., 25., 10., 10., 10.,
     1., 1., 1., 1., 1., 1. 
-]) 
+])
 P = Q * 10
-R = np.identity(action_size) * 8 * 1e-4
+# R = np.identity(action_size) * 8 * 1e-4
+# R = np.identity(action_size) * 1e-3
+R = np.identity(action_size) * 95 * 1e-5
+# R = np.identity(action_size) * 110 * 1e-5
 cost = SE3TrackingQuadraticGaussNewtonCost( Q, R, P, q_ref, xi_ref, action_size=4)
 
 us_init = np.zeros((N, action_size,))
@@ -129,21 +161,21 @@ ilqr_ss_se3 = iLQR_Tracking_SE3(    dynamics, cost, N,
                                     hessians=HESSIANS,
                                     rollout='nonlinear' )
 
-# xs_ms_se3, us_ms_se3, J_hist_ms_se3, _, _, \
-#     grad_hist_ms_se3, defect_hist_ms_se3= \
-#         ilqr_ms_se3.fit(x0, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ms_se3)
+xs_ms_se3, us_ms_se3, J_hist_ms_se3, _, _, \
+    grad_hist_ms_se3, defect_hist_ms_se3= \
+        ilqr_ms_se3.fit(x0, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ms_se3)
 
-# xs_ss_se3, us_ss_se3, J_hist_ss_se3, _, _, grad_hist_ss_se3 = \
-#         ilqr_ss_se3.fit(x0, us_init, 
-#                         n_iterations=max_iterations, 
-#                         tol_grad_norm=tol_gradiant_converge,
-#                         on_iteration=on_iteration_ss_se3)
+xs_ss_se3, us_ss_se3, J_hist_ss_se3, _, _, grad_hist_ss_se3 = \
+        ilqr_ss_se3.fit(x0, us_init, 
+                        n_iterations=max_iterations, 
+                        tol_grad_norm=tol_gradiant_converge,
+                        on_iteration=on_iteration_ss_se3)
 
 # =====================================================
-# Embedded Euclidean Unconstrained Method
+# Embedded Euclidean Unconstrained Method with Manifold Cost
 # =====================================================
 eps_init = 1e-3
 
@@ -151,26 +183,26 @@ eps_init = 1e-3
 ipopt_logcost_euc = EmbeddedEuclideanSE3_Drone( q_ref, xi_ref, dt, J, Q, R, 
                                                 eps_init=eps_init )
 
-# # get the solution
-# xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, \
-#     grad_hist_logcost_euc, defect_hist_logcost_euc = \
-#         ipopt_logcost_euc.fit(   x0, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_logcost_euc, us_logcost_euc, J_hist_logcost_euc, \
+    grad_hist_logcost_euc, defect_hist_logcost_euc = \
+        ipopt_logcost_euc.fit(   x0, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 # =====================================================
-# Embedded Euclidean Unconstrained Method with Manifold Cost
+# Embedded Euclidean Unconstrained Method 
 # =====================================================
 # intialize the embedded method
 ipopt_unconstr_euc = EmbeddedEuclideanSE3_Drone_MatrixNorm( q_ref, xi_ref, dt, J, Q, R, 
                                                             eps_init=eps_init )
 
-# # get the solution
-# xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
-#     grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
-#         ipopt_unconstr_euc.fit( x0, us_init, 
-#                                 n_iterations=max_iterations,
-#                                 tol_norm=tol_converge )
+# get the solution
+xs_unconstr_euc, us_unconstr_euc, J_hist_unconstr_euc, \
+    grad_hist_unconstr_euc, defect_hist_unconstr_euc = \
+        ipopt_unconstr_euc.fit( x0, us_init, 
+                                n_iterations=max_iterations,
+                                tol_norm=tol_converge )
 
 
 # =====================================================
@@ -239,39 +271,39 @@ def save_results_pickle(filename,
 # # Load Results
 # # =====================================================
 
-def load_results_pickle(filename):
-    with open(filename, 'rb') as f:
-        data = pickle.load(f)
-    return data
+# def load_results_pickle(filename):
+#     with open(filename, 'rb') as f:
+#         data = pickle.load(f)
+#     return data
 
-results = load_results_pickle(SAVE_RESULTS_DIR)
+# results = load_results_pickle(SAVE_RESULTS_DIR)
 
-ms_se3_data = results['ms_se3']
-xs_ms_se3 = ms_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-us_ms_se3 = ms_se3_data['us']            # 控制序列 (numpy 数组)
-J_hist_ms_se3 = ms_se3_data['J_hist']    # 目标函数历史 (列表)
-grad_hist_ms_se3 = ms_se3_data['grad_hist']  # 梯度范数历史 (列表)
-defect_hist_ms_se3 = ms_se3_data['defect_hist']  # 缺陷范数历史 (列表)
+# ms_se3_data = results['ms_se3']
+# xs_ms_se3 = ms_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+# us_ms_se3 = ms_se3_data['us']            # 控制序列 (numpy 数组)
+# J_hist_ms_se3 = ms_se3_data['J_hist']    # 目标函数历史 (列表)
+# grad_hist_ms_se3 = ms_se3_data['grad_hist']  # 梯度范数历史 (列表)
+# defect_hist_ms_se3 = ms_se3_data['defect_hist']  # 缺陷范数历史 (列表)
 
-ss_se3_data = results['ss_se3']
-xs_ss_se3 = ss_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
-us_ss_se3 = ss_se3_data['us']            # 控制序列 (numpy 数组)
-J_hist_ss_se3 = ss_se3_data['J_hist']    # 目标函数历史 (列表)
-grad_hist_ss_se3 = ss_se3_data['grad_hist']  # 梯度范数历史 (列表)
+# ss_se3_data = results['ss_se3']
+# xs_ss_se3 = ss_se3_data['xs']            # 状态序列 (列表，包含 manifpy 的 SO3 对象和 SO3Tangent 对象)
+# us_ss_se3 = ss_se3_data['us']            # 控制序列 (numpy 数组)
+# J_hist_ss_se3 = ss_se3_data['J_hist']    # 目标函数历史 (列表)
+# grad_hist_ss_se3 = ss_se3_data['grad_hist']  # 梯度范数历史 (列表)
 
-logcost_euc_data = results['logcost_euc']
-xs_logcost_euc = logcost_euc_data['xs']                  # 状态序列 (numpy 数组)
-us_logcost_euc = logcost_euc_data['us']                  # 控制序列 (numpy 数组)
-J_hist_logcost_euc = logcost_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
-grad_hist_logcost_euc = logcost_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
-defect_hist_logcost_euc = logcost_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
+# logcost_euc_data = results['logcost_euc']
+# xs_logcost_euc = logcost_euc_data['xs']                  # 状态序列 (numpy 数组)
+# us_logcost_euc = logcost_euc_data['us']                  # 控制序列 (numpy 数组)
+# J_hist_logcost_euc = logcost_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+# grad_hist_logcost_euc = logcost_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+# defect_hist_logcost_euc = logcost_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
 
-unconstr_euc_data = results['unconstr_euc']
-xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
-us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
-J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
-grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
-defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
+# unconstr_euc_data = results['unconstr_euc']
+# xs_unconstr_euc = unconstr_euc_data['xs']                  # 状态序列 (numpy 数组)
+# us_unconstr_euc = unconstr_euc_data['us']                  # 控制序列 (numpy 数组)
+# J_hist_unconstr_euc = unconstr_euc_data['J_hist']          # 目标函数历史 (numpy 数组)
+# grad_hist_unconstr_euc = unconstr_euc_data['grad_hist']    # 梯度范数历史 (numpy 数组)
+# defect_hist_unconstr_euc = unconstr_euc_data['defect_hist']# 缺陷范数历史 (numpy 数组)
 
 
 # # =====================================================
@@ -577,7 +609,7 @@ ax.plot(pos_ss_se3[:, 0], pos_ss_se3[:, 1], pos_ss_se3[:, 2],
 ax.plot(pos_unconstr_euc[:, 0], pos_unconstr_euc[:, 1], pos_unconstr_euc[:, 2],
             label='Embedded Unconstrained')
 ax.plot(pos_logcost_euc[:, 0], pos_logcost_euc[:, 1], pos_logcost_euc[:, 2],
-            label=r'Embedded with \mathcal{M} cost')
+            label=r'Embedded with $\mathcal{M}$ cost')
 ax.plot(pos_ref[:, 0], pos_ref[:, 1], pos_ref[:, 2],
             label='Reference')
 plt.legend()
