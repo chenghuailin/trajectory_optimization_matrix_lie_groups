@@ -6,16 +6,16 @@ from traoptlibrary.traopt_utilis import rotm2euler
 from traoptlibrary.traopt_dynamics import SO3Dynamics
 from traoptlibrary.traopt_cost import SO3TrackingQuadraticGaussNewtonCost
 from traoptlibrary.traopt_controller import iLQR_Tracking_SO3_MS, iLQR_Tracking_SO3
-from traoptlibrary.traopt_baseline import EmbeddedEuclideanSU2
+from traoptlibrary.traopt_baseline import EmbeddedEuclideanSU2_Pendulum3D
 from scipy.spatial.transform import Rotation
 from manifpy import SO3, SO3Tangent
 
 # =====================================================
-# SO3 Tracking Problem Import: Reference, Initial State, Solver Options
+# SwingUp Problem Import: Reference, Initial State, Solver Options
 # =====================================================
 
 path_to_reference_file = \
-    'visualization/optimized_trajectories/path_3dpendulum_8shape_tryout.npy'
+    'visualization/optimized_trajectories/path_3dpendulum_swingup.npy'
     # 'visualization/optimized_trajectories/path_3dpendulum_8shape.npy'
     
 with open( path_to_reference_file, 'rb' ) as f:
@@ -23,20 +23,22 @@ with open( path_to_reference_file, 'rb' ) as f:
     xi_ref = np.load(f)
     dt = np.load(f)
 
-q_ref_quat = [ Rotation.from_matrix(x).as_quat(scalar_first=True) for x in q_ref ]
-
 Nsim = q_ref.shape[0] - 1
 print("Horizon of dataset is", Nsim)
 
-quat0 = Rotation.from_euler('zxy', [90.,10.,45.], degrees=True).as_quat(scalar_first=True) 
-q0 = SO3( quat0 ) 
-omega0 = 1.7 * 1e-1 
-xi0 = SO3Tangent( np.ones((3,1)) * omega0 )
-x0_mnf = [ q0, xi0 ]
-x0_np = [ quat0, xi0.coeffs() ]
-J = np.diag([ 0.5, 0.7, 0.9 ])
+q_ref_quat = [ Rotation.from_matrix(x).as_quat(scalar_first=True) for x in q_ref ]
 
-max_iterations = 250
+q0 = SO3( Rotation.from_euler('xy',[10., 45.], degrees=True).as_quat() ) 
+# xi0 = SO3Tangent( np.array([1.,1.,0.]) * 5 )
+xi0 = SO3Tangent( np.array([1.,1.,0.]) * 1 )
+x0_mnf = [ q0, xi0 ]
+x0_np = [ Rotation.from_euler('xy',[10., 45.], degrees=True).as_quat(scalar_first=True), xi0.coeffs() ]
+
+J = np.diag([ 0.5,0.7,0.9 ])
+m = 1
+length = 0.5
+
+max_iterations = 2000
 
 tol_gradiant_converge = 1e-12
 tol_converge = tol_gradiant_converge
@@ -50,9 +52,11 @@ N = Nsim
 action_size = 3
 state_size = 6
 
-Q = np.diag([250., 10., 10., 1., 1., 1.,])
-P = Q * 10
-R = np.identity(3) * 1e-3 # 就这个了！
+Q = np.diag([ 
+    250., 10., 10., 1., 1., 1.,
+])
+P = Q * 1.
+R = np.identity(3) * 1e-2
 
 us_init = np.zeros((N, action_size,))
 
@@ -61,7 +65,7 @@ us_init = np.zeros((N, action_size,))
 # =====================================================
 
 # intialize the embedded method
-ipopt_su2_unconstr_euc = EmbeddedEuclideanSU2( q_ref, xi_ref, dt, J, Q, R, P )
+ipopt_su2_unconstr_euc = EmbeddedEuclideanSU2_Pendulum3D(  q_ref, xi_ref, dt, J, m, length, Q, R, P)
 
 # get the solution
 xs_su2_unconstr_euc , us_su2_unconstr_euc , J_hist_su2_unconstr_euc , \
@@ -69,6 +73,7 @@ xs_su2_unconstr_euc , us_su2_unconstr_euc , J_hist_su2_unconstr_euc , \
         ipopt_su2_unconstr_euc.fit(  x0_np, us_init, 
                                     n_iterations=max_iterations,
                                     tol_norm=tol_converge )
+
 
 
 # # =====================================================

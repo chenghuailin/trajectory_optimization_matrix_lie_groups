@@ -160,6 +160,10 @@ def quat2rotm(quat:np.ndarray) -> np.ndarray:
     """ Converts a or a list of scalar_first quaternion to a rotation matrix. """
     return Rotation.from_quat(quat, scalar_first=True).as_matrix()
 
+def quat2euler(quat:np.ndarray) -> np.ndarray:
+    """ Converts a or a list of scalar_first quaternion to a rotation matrix. """
+    return Rotation.from_quat(quat, scalar_first=True).as_euler('zxy',degrees=True)
+
 def rotm2quat(m:np.ndarray) -> np.ndarray:
     """Creates a quaternion from a rotation matrix defining a given orientation.
     
@@ -309,7 +313,7 @@ def SE32quatpos(m):
             m[:3, 3]
         )).reshape((7,1))
     else:
-        raise ValueError("Input must be a 7-d np or jnp vector")
+        raise ValueError("Input must be a 4*4 np or jnp vector")
     
 vec_SE32quatpos = jit(vmap(SE32quatpos))
 
